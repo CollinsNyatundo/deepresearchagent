@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from research_engine.models import (
+    KnowledgeGraph,
     MindmapGraph,
     ResearchResult,
     RunSummary,
@@ -97,6 +98,55 @@ def save_mindmap(
     run_dir = Path(output_dir) / run_id
     mindmap_path = run_dir / "mindmap.json"
     mindmap_path.write_text(mindmap.model_dump_json(indent=2), encoding="utf-8")
+
+
+# ─── Knowledge Graph (Graphify) ──────────────────────────────────────
+
+async def save_knowledge_graph(
+    kg: KnowledgeGraph,
+    run_id: str,
+    output_dir: Path | str = DEFAULT_OUTPUT_DIR,
+) -> None:
+    """Save a KnowledgeGraph to disk as knowledge_graph.json."""
+    import aiofiles
+    run_dir = Path(output_dir) / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    kg_path = run_dir / "knowledge_graph.json"
+    async with aiofiles.open(kg_path, "w", encoding="utf-8") as f:
+        await f.write(kg.model_dump_json(indent=2))
+    logger.info(f"Saved knowledge graph to: {kg_path}")
+
+
+def load_knowledge_graph(
+    run_id: str,
+    output_dir: Path | str = DEFAULT_OUTPUT_DIR,
+) -> KnowledgeGraph:
+    """Load a KnowledgeGraph from disk."""
+    run_dir = Path(output_dir) / run_id
+    kg_path = run_dir / "knowledge_graph.json"
+
+    if not kg_path.exists():
+        raise FileNotFoundError(f"Knowledge graph not found for run: {run_id}")
+
+    data = json.loads(kg_path.read_text(encoding="utf-8"))
+    return KnowledgeGraph.model_validate(data)
+
+
+def knowledge_graph_available(
+    run_id: str,
+    output_dir: Path | str = DEFAULT_OUTPUT_DIR,
+) -> bool:
+    """Return True if a knowledge_graph.json exists for this run."""
+    return (Path(output_dir) / run_id / "knowledge_graph.json").exists()
+
+
+def graph_html_available(
+    run_id: str,
+    output_dir: Path | str = DEFAULT_OUTPUT_DIR,
+) -> bool:
+    """Return True if a graph.html exists for this run."""
+    return (Path(output_dir) / run_id / "graph.html").exists()
+
 
 
 def load_report(run_id: str, output_dir: Path | str = DEFAULT_OUTPUT_DIR) -> str:

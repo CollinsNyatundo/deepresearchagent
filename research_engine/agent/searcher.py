@@ -32,6 +32,7 @@ async def generate_query(
     *,
     llm: LLMProvider,
     model: str | None = None,
+    provider: str | None = None,
 ) -> SearchQuery:
     """Generate the next optimal search query based on topic, plan, and history."""
     prompt = SEARCH_QUERY_GENERATION_TEMPLATE.format(
@@ -41,7 +42,7 @@ async def generate_query(
     )
 
     try:
-        result = await llm.call_structured(prompt, SearchQuery, model=model)
+        result = await llm.call_structured(prompt, SearchQuery, model=model, provider=provider)
         query = SearchQuery(**result)
         logger.info(f"Generated query: {query.query}")
         return query
@@ -104,6 +105,7 @@ async def synthesize_answer(
     *,
     llm: LLMProvider,
     model: str | None = None,
+    provider: str | None = None,
 ) -> SearchAnswer:
     """Synthesize an answer from FULL PAGE CONTENT (not just snippets).
 
@@ -126,7 +128,7 @@ async def synthesize_answer(
     )
 
     try:
-        result = await llm.call_structured(prompt, SearchAnswer, model=model)
+        result = await llm.call_structured(prompt, SearchAnswer, model=model, provider=provider)
         answer = SearchAnswer(**result)
 
         # Ensure citations have proper metadata

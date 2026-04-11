@@ -30,6 +30,7 @@ async def answer_with_crossover(
     *,
     llm: LLMProvider,
     model: str | None = None,
+    provider: str | None = None,
     num_candidates: int = 3,
 ) -> SearchAnswer:
     """Generate multiple answer candidates and merge them via crossover.
@@ -67,7 +68,7 @@ async def answer_with_crossover(
         # We'll call synthesize_answer but with different temperatures
         # For simplicity, we generate diverse prompts
         tasks.append(
-            _generate_candidate(topic, query, scraped_pages, llm, model, config)
+            _generate_candidate(topic, query, scraped_pages, llm, model, config, provider=provider)
         )
 
     candidates = await asyncio.gather(*tasks, return_exceptions=True)
@@ -83,7 +84,7 @@ async def answer_with_crossover(
     if not valid_candidates:
         logger.warning("All candidates failed, falling back to single-shot answer")
         return await synthesize_answer(
-            topic, query, scraped_pages, llm=llm, model=model
+            topic, query, scraped_pages, llm=llm, model=model, provider=provider
         )
 
     if len(valid_candidates) == 1:
@@ -92,7 +93,7 @@ async def answer_with_crossover(
     # Step 2: Crossover — merge candidates into superior answer
     logger.info(f"Merging {len(valid_candidates)} candidates via crossover")
     return await _crossover_merge(
-        topic, query, valid_candidates, llm=llm, model=model
+        topic, query, valid_candidates, llm=llm, model=model, provider=provider
     )
 
 
@@ -103,6 +104,7 @@ async def _generate_candidate(
     llm: LLMProvider,
     model: str | None,
     config: dict,
+    provider: str | None = None,
 ) -> SearchAnswer:
     """Generate a single answer candidate with specific LLM settings."""
     from research_engine.agent.searcher import _format_page_contents
@@ -120,6 +122,7 @@ async def _generate_candidate(
         SearchAnswer,
         model=model,
         temperature=config.get("temperature", 0.7),
+        provider=provider,
     )
     return SearchAnswer(**result)
 
@@ -131,6 +134,7 @@ async def _crossover_merge(
     *,
     llm: LLMProvider,
     model: str | None = None,
+    provider: str | None = None,
 ) -> SearchAnswer:
     """Merge multiple candidates into a single superior answer."""
     candidates_text = "\n\n".join(
@@ -146,7 +150,7 @@ async def _crossover_merge(
     )
 
     try:
-        result = await llm.call_structured(prompt, SearchAnswer, model=model)
+        result = await llm.call_structured(prompt, SearchAnswer, model=model, provider=provider)
         merged = SearchAnswer(**result)
 
         # Collect all unique citations from candidates

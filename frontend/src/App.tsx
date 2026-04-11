@@ -18,6 +18,7 @@ import {
   Notification,
   Select,
   Loader,
+  SegmentedControl,
 } from '@mantine/core';
 import {
   IconFlask,
@@ -27,18 +28,20 @@ import {
   IconBrain,
   IconDownload,
   IconListCheck,
+  IconNetwork,
 } from '@tabler/icons-react';
 
 import { RunList } from './components/runs/RunList';
 import { ReportView } from './components/views/ReportView';
 import { MindmapView } from './components/views/MindmapView';
+import { KnowledgeGraphView } from './components/knowledge-graph/KnowledgeGraphView';
 import { ResearchProgress } from './components/views/ResearchProgress';
 import { PlanReview } from './components/views/PlanReview';
 import { ExportPanel } from './components/views/ExportPanel';
 import { api } from './api/client';
 import type { ResearchEvent, PlanPreview } from './types/api';
 
-const MODEL_PRESETS = [
+const OPENROUTER_PRESETS = [
   {
     value: 'nvidia/nemotron-3-super-120b-a12b:free',
     label: 'Nemotron 3 Super — 1M ctx, agents',
@@ -50,6 +53,21 @@ const MODEL_PRESETS = [
   {
     value: 'qwen/qwen3-235b-a22b:free',
     label: 'Qwen 3 235B — RAG + tools',
+  },
+];
+
+const GROQ_PRESETS = [
+  {
+    value: 'llama-3.3-70b-versatile',
+    label: 'Llama 3.3 70B — best for research/agents',
+  },
+  {
+    value: 'deepseek-r1-distill-llama-70b',
+    label: 'DeepSeek R1 (Llama 70B) — reasoning',
+  },
+  {
+    value: 'llama-3.1-8b-instant',
+    label: 'Llama 3.1 8B Instant — fastest',
   },
 ];
 
@@ -74,9 +92,22 @@ export default function App() {
   const [modalOpen, { open: openModal, close: closeModal }] = useDisclosure(false);
   const [query, setQuery] = useState('');
   const [model, setModel] = useState('nvidia/nemotron-3-super-120b-a12b:free');
+  const [provider, setProvider] = useState<'openrouter' | 'groq'>('openrouter');
   const [depth, setDepth] = useState(5);
+  const [mode, setMode] = useState<'web' | 'github'>('web');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // When provider changes, reset model to the best default for that provider
+  const handleProviderChange = (val: string) => {
+    const p = val as 'openrouter' | 'groq';
+    setProvider(p);
+    if (p === 'groq') {
+      setModel('llama-3.3-70b-versatile');
+    } else {
+      setModel('nvidia/nemotron-3-super-120b-a12b:free');
+    }
+  };
 
   // Plan review state (Phase 4)
   const [planPreview, setPlanPreview] = useState<PlanPreview | null>(null);
@@ -86,6 +117,10 @@ export default function App() {
   const [streamEvents, setStreamEvents] = useState<ResearchEvent[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Knowledge graph state (Graphify)
+  const [kgReady, setKgReady] = useState(false);
+  const [kgStats, setKgStats] = useState<{ nodes: number; edges: number; communities: number } | null>(null);
 
   // ─── Generate Plan (Phase 4) ──────────────────────────────
   const handleGeneratePlan = useCallback(async () => {
@@ -99,6 +134,8 @@ export default function App() {
         query: query.trim(),
         model,
         depth,
+        mode,
+        provider,
       });
       setPlanPreview(preview);
       setPlanQuery(query.trim());
@@ -110,7 +147,7 @@ export default function App() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [query, model, depth, closeModal]);
+  }, [query, model, depth, mode, provider, closeModal]);
 
   // ─── Approve & Start Research with SSE (Phase 2 + Phase 4) ─
   const handleApproveAndStart = useCallback(
@@ -119,6 +156,8 @@ export default function App() {
       setIsStreaming(true);
       setAppState('streaming');
       setActiveTab('progress');
+      setKgReady(false);
+      setKgStats(null);
 
       const controller = api.streamApprovedPlan(
         {
@@ -127,11 +166,22 @@ export default function App() {
           sub_queries: subQueries,
           model,
           depth,
+          mode,
+          provider,
           export_formats: exportFormats,
         },
         // onEvent
         (event) => {
           setStreamEvents((prev) => [...prev, event]);
+          // Handle knowledge graph ready event
+          if (event.event === 'knowledge_graph_ready') {
+            setKgReady(true);
+            setKgStats({
+              nodes: event.data.node_count ?? 0,
+              edges: event.data.edge_count ?? 0,
+              communities: event.data.community_count ?? 0,
+            });
+          }
         },
         // onDone
         (data) => {
@@ -152,7 +202,7 @@ export default function App() {
 
       abortRef.current = controller;
     },
-    [planQuery, model, depth],
+    [planQuery, model, depth, mode, provider],
   );
 
   // ─── Quick Start (no plan review — direct SSE stream) ─────
@@ -171,9 +221,19 @@ export default function App() {
         query: query.trim(),
         model,
         depth,
+        mode,
+        provider,
       },
       (event) => {
         setStreamEvents((prev) => [...prev, event]);
+        if (event.event === 'knowledge_graph_ready') {
+          setKgReady(true);
+          setKgStats({
+            nodes: event.data.node_count ?? 0,
+            edges: event.data.edge_count ?? 0,
+            communities: event.data.community_count ?? 0,
+          });
+        }
       },
       (data) => {
         setIsStreaming(false);
@@ -194,7 +254,7 @@ export default function App() {
 
     abortRef.current = controller;
     setQuery('');
-  }, [query, model, depth, closeModal]);
+  }, [query, model, depth, mode, provider, closeModal]);
 
   // ─── Reset to idle ────────────────────────────────────────
   const resetToIdle = useCallback(() => {
@@ -202,6 +262,8 @@ export default function App() {
     setPlanQuery('');
     setStreamEvents([]);
     setIsStreaming(false);
+    setKgReady(false);
+    setKgStats(null);
     setAppState('idle');
     if (abortRef.current) {
       abortRef.current.abort();
@@ -240,8 +302,8 @@ export default function App() {
                 Researching...
               </Badge>
             )}
-            <Badge variant="light" color="indigo" size="lg">
-              {model.split('/').pop()?.replace(/:.*$/, '') || 'model'}
+            <Badge variant="light" color={provider === 'groq' ? 'orange' : 'indigo'} size="lg">
+              {provider === 'groq' ? 'Groq: ' : ''}{model.split('/').pop()?.replace(/:.*$/, '') || 'model'}
             </Badge>
           </Group>
         </Group>
@@ -325,6 +387,24 @@ export default function App() {
                   Mindmap
                 </Tabs.Tab>
                 <Tabs.Tab
+                  value="knowledge-graph"
+                  leftSection={<IconNetwork size={16} />}
+                  rightSection={
+                    kgReady ? (
+                      <Badge size="xs" color="teal" variant="filled" circle>
+                        ✓
+                      </Badge>
+                    ) : undefined
+                  }
+                >
+                  Knowledge Graph
+                  {kgStats && (
+                    <Text span size="xs" c="dimmed" ml={4}>
+                      ({kgStats.nodes}N)
+                    </Text>
+                  )}
+                </Tabs.Tab>
+                <Tabs.Tab
                   value="export"
                   leftSection={<IconDownload size={16} />}
                 >
@@ -337,6 +417,9 @@ export default function App() {
               </Tabs.Panel>
               <Tabs.Panel value="mindmap" pt="md">
                 <MindmapView runId={selectedRunId} />
+              </Tabs.Panel>
+              <Tabs.Panel value="knowledge-graph" pt="md">
+                <KnowledgeGraphView runId={selectedRunId} />
               </Tabs.Panel>
               <Tabs.Panel value="export" pt="md">
                 <ExportPanel runId={selectedRunId} />
@@ -407,15 +490,47 @@ export default function App() {
             required
           />
 
+          <div>
+            <Text size="sm" fw={500} mb={4}>
+              LLM Provider
+            </Text>
+            <SegmentedControl
+              fullWidth
+              value={provider}
+              onChange={handleProviderChange}
+              data={[
+                { label: '🌐 OpenRouter (free models)', value: 'openrouter' },
+                { label: '⚡ Groq (fast inference)', value: 'groq' },
+              ]}
+            />
+          </div>
+
+          <div>
+            <Text size="sm" fw={500} mb={4}>
+              Domain
+            </Text>
+            <SegmentedControl
+              fullWidth
+              value={mode}
+              onChange={(val) => setMode(val as 'web' | 'github')}
+              data={[
+                { label: 'Web Research', value: 'web' },
+                { label: 'GitHub Repository', value: 'github' },
+              ]}
+            />
+          </div>
+
           <Tooltip
-            label="Paste any OpenRouter model ID. The model handles planning, synthesis, and report generation."
+            label={provider === 'groq'
+              ? 'Enter a Groq model ID (e.g. llama-3.3-70b-versatile). See console.groq.com for available models.'
+              : 'Paste any OpenRouter model ID. The model handles planning, synthesis, and report generation.'}
             multiline
             maw={400}
           >
             <TextInput
-              label="Model (OpenRouter ID)"
-              placeholder="nvidia/nemotron-3-super-120b-a12b:free"
-              description="Supports any model available on OpenRouter"
+              label={provider === 'groq' ? 'Model (Groq ID)' : 'Model (OpenRouter ID)'}
+              placeholder={provider === 'groq' ? 'llama-3.3-70b-versatile' : 'nvidia/nemotron-3-super-120b-a12b:free'}
+              description={provider === 'groq' ? 'Groq model name — no provider prefix needed' : 'Supports any model available on OpenRouter'}
               value={model}
               onChange={(e) => setModel(e.currentTarget.value)}
             />
@@ -424,7 +539,7 @@ export default function App() {
           <Select
             label="Quick Presets"
             placeholder="Select a preset model..."
-            data={MODEL_PRESETS}
+            data={provider === 'groq' ? GROQ_PRESETS : OPENROUTER_PRESETS}
             onChange={(val) => val && setModel(val)}
             clearable
           />

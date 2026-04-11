@@ -9,6 +9,10 @@ def test_validate_model_id_valid():
     assert validate_model_id("nvidia/nemotron-3-super-120b-a12b:free") == "nvidia/nemotron-3-super-120b-a12b:free"
     assert validate_model_id("openai/gpt-oss-120b:free") == "openai/gpt-oss-120b:free"
     assert validate_model_id("  qwen/qwen3-235b-a22b:free  ") == "qwen/qwen3-235b-a22b:free"
+    # Groq plain model names are valid when provider=groq
+    assert validate_model_id("llama-3.3-70b-versatile", provider="groq") == "llama-3.3-70b-versatile"
+    # groq/ prefix is automatically stripped
+    assert validate_model_id("groq/llama-3.3-70b-versatile") == "llama-3.3-70b-versatile"
 
 
 def test_validate_model_id_invalid():
@@ -17,7 +21,7 @@ def test_validate_model_id_invalid():
         validate_model_id("")
 
     with pytest.raises(ValueError, match="provider/model"):
-        validate_model_id("no-slash-here")
+        validate_model_id("no-slash-here")  # OpenRouter requires slash
 
     with pytest.raises(ValueError, match="200 characters"):
         validate_model_id("a/" + "b" * 200)

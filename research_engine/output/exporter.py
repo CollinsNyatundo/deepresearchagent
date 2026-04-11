@@ -19,19 +19,23 @@ logger = logging.getLogger(__name__)
 
 # MIME types for each format
 MEDIA_TYPES: dict[str, str] = {
-    "markdown":     "text/markdown",
-    "pdf":          "application/pdf",
-    "docx":         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "xlsx":         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "mindmap_json": "application/json",
+    "markdown":          "text/markdown",
+    "pdf":               "application/pdf",
+    "docx":              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "xlsx":              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "mindmap_json":      "application/json",
+    "knowledge_graph":   "application/json",
+    "graph_html":        "text/html",
 }
 
 EXTENSIONS: dict[str, str] = {
-    "markdown":     ".md",
-    "pdf":          ".pdf",
-    "docx":         ".docx",
-    "xlsx":         ".xlsx",
-    "mindmap_json": ".json",
+    "markdown":          ".md",
+    "pdf":               ".pdf",
+    "docx":              ".docx",
+    "xlsx":              ".xlsx",
+    "mindmap_json":      ".json",
+    "knowledge_graph":   "_kg.json",
+    "graph_html":        "_graph.html",
 }
 
 
@@ -88,6 +92,10 @@ async def export_run(
             _export_xlsx(result, export_path)
         case "mindmap_json":
             _export_mindmap_json(run_id, run_dir, export_path)
+        case "knowledge_graph":
+            _export_knowledge_graph(run_id, run_dir, export_path)
+        case "graph_html":
+            _export_graph_html(run_id, run_dir, export_path)
 
     logger.info(f"Export saved: {export_path}")
     return export_path
@@ -400,6 +408,42 @@ def _export_mindmap_json(run_id: str, run_dir: Path, path: Path) -> None:
             json.dumps({"run_id": run_id, "nodes": [], "edges": []}, indent=2),
             encoding="utf-8",
         )
+
+
+def _export_knowledge_graph(run_id: str, run_dir: Path, path: Path) -> None:
+    """Export the Graphify knowledge graph JSON."""
+    kg_path = run_dir / "knowledge_graph.json"
+    if kg_path.exists():
+        path.write_bytes(kg_path.read_bytes())
+    else:
+        # Fallback: empty KG
+        path.write_text(
+            json.dumps({"run_id": run_id, "nodes": [], "edges": [], "communities": []}, indent=2),
+            encoding="utf-8",
+        )
+        logger.warning(f"Knowledge graph not built yet for run {run_id} — exported empty graph")
+
+
+def _export_graph_html(run_id: str, run_dir: Path, path: Path) -> None:
+    """Export the Graphify interactive HTML visualization."""
+    html_path = run_dir / "graph.html"
+    if html_path.exists():
+        path.write_bytes(html_path.read_bytes())
+    else:
+        # Fallback: empty HTML page
+        path.write_text(
+            f"""<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Knowledge Graph — {run_id}</title></head>
+<body>
+<h2>Knowledge Graph Not Available</h2>
+<p>The interactive graph has not been built for this run yet.</p>
+<p>Use the <em>Build Knowledge Graph</em> action in the Research UI to generate it.</p>
+</body>
+</html>""",
+            encoding="utf-8",
+        )
+        logger.warning(f"graph.html not built yet for run {run_id} — exported placeholder")
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────

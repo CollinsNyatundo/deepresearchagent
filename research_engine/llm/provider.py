@@ -21,11 +21,15 @@ MAX_RETRIES = 3
 RETRY_BACKOFF_BASE = 2.0  # seconds
 
 
-def validate_model_id(model: str) -> str:
-    """Validate an OpenRouter model ID string.
+def validate_model_id(model: str, provider: str | None = None) -> str:
+    """Validate a model ID string.
+
+    OpenRouter model IDs follow the 'provider/model' format.
+    Groq model IDs are plain names (e.g. 'llama-3.3-70b-versatile').
 
     Args:
-        model: The model ID to validate (e.g. 'nvidia/nemotron-3-super-120b-a12b:free').
+        model: The model ID to validate.
+        provider: Optional provider hint ('groq' skips the slash requirement).
 
     Returns:
         The validated and stripped model ID.
@@ -38,10 +42,15 @@ def validate_model_id(model: str) -> str:
     model = model.strip()
     if len(model) > 200:
         raise ValueError("Model ID must be at most 200 characters")
-    if "/" not in model:
+    # Strip 'groq/' prefix if user accidentally included it
+    if model.startswith("groq/"):
+        model = model[len("groq/"):]
+        return model
+    # OpenRouter requires provider/model format; Groq uses plain names
+    if provider != "groq" and "/" not in model:
         raise ValueError(
             f"Model ID must be in 'provider/model' format (got '{model}'). "
-            "Check the exact id on OpenRouter."
+            "Check the exact id on OpenRouter or use --provider groq for Groq models."
         )
     return model
 
@@ -55,26 +64,46 @@ class LLMProvider:
 
     def __init__(self, config: LLMConfig | None = None):
         self.config = config or LLMConfig()
-        self.api_key = os.environ.get("OPENROUTER_API_KEY", "")
-        if not self.api_key:
-            logger.warning(
-                "OPENROUTER_API_KEY not set. LLM calls will fail. "
-                "Set the environment variable or add it to .env"
-            )
+        self.openrouter_api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        self.groq_api_key = os.environ.get("GROQ_API_KEY", "")
 
     def _get_llm(
         self,
         model: str | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        provider: str | None = None,
     ) -> ChatOpenAI:
-        """Create a ChatOpenAI instance pointed at OpenRouter."""
+        """Create a ChatOpenAI instance pointed at OpenRouter or Groq."""
+        provider = provider or self.config.provider
+        
+        if provider == "groq":
+            api_key = self.groq_api_key
+            base_url = "https://api.groq.com/openai/v1"
+            # Strip groq/ prefix if user passed it (e.g. 'groq/llama-3.3-70b-versatile')
+            if model and model.startswith("groq/"):
+                model = model[len("groq/"):]
+            # Fallback if no model specified or it's an OpenRouter-only model
+            if not model or "/" in model:
+                model = "llama-3.3-70b-versatile"
+            # Groq free tier TPM = 12,000 (input + max_output_tokens counted together).
+            # Use groq_max_tokens (default 4096) to stay within limits.
+            effective_max_tokens = max_tokens or self.config.groq_max_tokens
+        else:
+            api_key = self.openrouter_api_key
+            base_url = self.config.base_url
+            model = model or self.config.default_model
+            effective_max_tokens = max_tokens or self.config.max_tokens
+
+        if not api_key:
+            logger.warning(f"API Key for provider '{provider}' not set. LLM calls will fail.")
+
         return ChatOpenAI(
-            base_url=self.config.base_url,
-            api_key=self.api_key,
-            model=model or self.config.default_model,
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
             temperature=temperature if temperature is not None else self.config.temperature,
-            max_tokens=max_tokens or self.config.max_tokens,
+            max_tokens=effective_max_tokens,
             timeout=self.config.request_timeout,
         )
 
@@ -84,18 +113,20 @@ class LLMProvider:
         *,
         model: str | None = None,
         temperature: float | None = None,
+        provider: str | None = None,
     ) -> str:
         """Unstructured async text completion with retry logic.
 
         Args:
             prompt: The prompt text to send.
-            model: Optional model override (OpenRouter ID).
+            model: Optional model override (OpenRouter/Groq ID).
             temperature: Optional temperature override.
+            provider: Optional provider override ('groq' or 'openrouter').
 
         Returns:
             The model's text response.
         """
-        llm = self._get_llm(model=model, temperature=temperature)
+        llm = self._get_llm(model=model, temperature=temperature, provider=provider)
 
         for attempt in range(MAX_RETRIES):
             try:
@@ -121,27 +152,34 @@ class LLMProvider:
         *,
         model: str | None = None,
         temperature: float | None = None,
+        provider: str | None = None,
     ) -> dict[str, Any]:
         """Structured output with automatic fallback to JSON parsing.
 
-        Tries LangChain's with_structured_output first. If the model doesn't
-        support it, falls back to raw completion + Pydantic validation.
+        For Groq models, uses 'json_object' mode (llama-3.3-70b-versatile does
+        not support 'json_schema'). For OpenRouter, tries 'json_schema' first.
+        Falls back to raw completion + Pydantic validation for both.
 
         Args:
             prompt: The prompt text.
             schema: A Pydantic model class defining the expected output shape.
             model: Optional model override.
             temperature: Optional temperature override.
+            provider: Optional provider override ('groq' or 'openrouter').
 
         Returns:
             A dict matching the schema.
         """
-        llm = self._get_llm(model=model, temperature=temperature)
+        effective_provider = provider or self.config.provider
+        llm = self._get_llm(model=model, temperature=temperature, provider=provider)
 
         # Strategy 1: Native structured output
+        # Groq's llama models support json_object but NOT json_schema.
+        # Only openai/gpt-oss-* models on Groq support json_schema (strict mode).
+        structured_output_method = "json_object" if effective_provider == "groq" else "json_schema"
         try:
             structured_llm = llm.with_structured_output(
-                schema=schema, method="json_schema"
+                schema=schema, method=structured_output_method
             )
             result = await structured_llm.ainvoke(prompt)
             if isinstance(result, BaseModel):
@@ -164,7 +202,7 @@ class LLMProvider:
             + f"Schema: {json.dumps(schema.model_json_schema(), indent=2)}"
         )
 
-        raw = await self.call(json_prompt, model=model, temperature=temperature)
+        raw = await self.call(json_prompt, model=model, temperature=temperature, provider=provider)
         cleaned = _extract_json(raw)
 
         try:

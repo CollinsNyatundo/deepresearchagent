@@ -2,6 +2,10 @@
 # Copy this file to config.toml and fill in your API keys.
 
 [llm]
+# LLM provider: "openrouter" (default) or "groq"
+# Can also be set via env var: LLM_PROVIDER=groq
+provider = "openrouter"
+
 default_model = "nvidia/nemotron-3-super-120b-a12b:free"
 base_url = "https://openrouter.ai/api/v1"
 temperature = 0.2
@@ -12,6 +16,10 @@ max_tokens = 16384
 nemotron = "nvidia/nemotron-3-super-120b-a12b:free"
 gpt_oss = "openai/gpt-oss-120b:free"
 qwen = "qwen/qwen3-235b-a22b:free"
+# Groq models — use these when provider = "groq"
+# groq_llama = "llama-3.3-70b-versatile"       # Best for reasoning/agentic tasks
+# groq_llama_fast = "llama-3.1-8b-instant"     # Fastest, good for simple tasks
+# groq_deepseek = "deepseek-r1-distill-llama-70b"  # Reasoning specialist
 
 [search]
 default_provider = "duckduckgo"      # duckduckgo | tavily | brave
@@ -40,3 +48,22 @@ progress_check_interval = 5
 host = "0.0.0.0"
 port = 8000
 cors_origins = ["http://localhost:5173"]
+
+[graphify]
+# Master switch — set to false to disable all knowledge graph features
+enabled = true
+
+# Extraction mode:
+# "fast" — AST-only, deterministic, low cost, minutes to build
+# "deep" — AST + LLM-inferred semantic edges, hours on large corpora
+mode = "deep"
+
+# Strategy B: Start Graphify MCP server after building the graph
+# so you can query the graph interactively from the UI
+mcp_enabled = true
+mcp_port = 8765
+
+# Strategy C: max ArXiv/PDF URLs to enrich per run
+# Set to 0 for unlimited (may be slow)
+max_paper_enrichments = 5
+

@@ -33,6 +33,7 @@ async def reflective_retry(
     *,
     llm: LLMProvider,
     model: str | None = None,
+    provider: str | None = None,
     retry_count: int = 0,
 ) -> RetryCorrection:
     """Analyze a research step failure and suggest a correction.
@@ -81,7 +82,7 @@ async def reflective_retry(
     )
 
     try:
-        result = await llm.call_structured(prompt, RetryCorrection, model=model)
+        result = await llm.call_structured(prompt, RetryCorrection, model=model, provider=provider)
         if isinstance(result, dict):
             correction = RetryCorrection(**result)
         else:

@@ -82,18 +82,26 @@ class DuckDuckGoSearch:
             return []
 
     def _sync_search(self, query: str, max_results: int) -> list[SearchResult]:
-        """Synchronous DDG search — runs in thread pool."""
-        from duckduckgo_search import DDGS
+        """Synchronous DDG search — runs in thread pool.
 
-        ddgs = DDGS(timeout=20)
-        raw = ddgs.text(query, max_results=max_results, backend="auto")
+        Supports both the new `ddgs` package (renamed from `duckduckgo_search`).
+        Falls back to old name during transition.
+        """
+        try:
+            # New package name (>= v7.x renamed to ddgs)
+            from ddgs import DDGS
+        except ImportError:
+            from duckduckgo_search import DDGS  # type: ignore[no-redef]
+
+        ddgs_client = DDGS(timeout=20)
+        raw = ddgs_client.text(query, max_results=max_results, backend="auto")
         results = [
             SearchResult(
                 url=r.get("href", ""),
                 title=r.get("title", ""),
                 snippet=r.get("body", ""),
             )
-            for r in raw
+            for r in (raw or [])
             if r.get("href")
         ]
         logger.info(f"DDG returned {len(results)} results for: {query}")

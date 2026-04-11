@@ -27,6 +27,7 @@ async def create_plan(
     *,
     llm: LLMProvider,
     model: str | None = None,
+    provider: str | None = None,
 ) -> ResearchPlan:
     """Create an initial research plan for a topic.
 
@@ -35,7 +36,7 @@ async def create_plan(
     prompt = RESEARCH_PLANNING_TEMPLATE.format(topic=topic)
 
     try:
-        result = await llm.call_structured(prompt, ResearchPlan, model=model)
+        result = await llm.call_structured(prompt, ResearchPlan, model=model, provider=provider)
         plan = ResearchPlan(**result)
         logger.info(f"Created research plan with {len(plan.steps)} steps")
         return plan
@@ -56,6 +57,7 @@ async def decompose_query(
     *,
     llm: LLMProvider,
     model: str | None = None,
+    provider: str | None = None,
 ) -> list[str]:
     """Break a complex research query into 2-4 focused sub-queries.
 
@@ -68,7 +70,7 @@ async def decompose_query(
     prompt = QUERY_DECOMPOSITION_TEMPLATE.format(topic=topic)
 
     try:
-        result = await llm.call_structured(prompt, QueryDecomposition, model=model)
+        result = await llm.call_structured(prompt, QueryDecomposition, model=model, provider=provider)
         if isinstance(result, dict):
             decomp = QueryDecomposition(**result)
         else:
@@ -93,6 +95,7 @@ async def reflect_on_plan(
     *,
     llm: LLMProvider,
     model: str | None = None,
+    provider: str | None = None,
 ) -> ResearchPlanReflection:
     """Evaluate whether the current plan needs updating based on findings so far."""
     prompt = RESEARCH_PLAN_REFLECTION_TEMPLATE.format(
@@ -102,7 +105,7 @@ async def reflect_on_plan(
     )
 
     try:
-        result = await llm.call_structured(prompt, ResearchPlanReflection, model=model)
+        result = await llm.call_structured(prompt, ResearchPlanReflection, model=model, provider=provider)
         reflection = ResearchPlanReflection(**result)
         logger.info(f"Plan reflection: should_update={reflection.should_update}")
         return reflection
@@ -119,6 +122,7 @@ async def update_plan(
     *,
     llm: LLMProvider,
     model: str | None = None,
+    provider: str | None = None,
 ) -> ResearchPlan:
     """Update the research plan based on a reflection."""
     prompt = RESEARCH_PLAN_UPDATE_TEMPLATE.format(
@@ -129,7 +133,7 @@ async def update_plan(
     )
 
     try:
-        result = await llm.call_structured(prompt, ResearchPlan, model=model)
+        result = await llm.call_structured(prompt, ResearchPlan, model=model, provider=provider)
         updated = ResearchPlan(**result)
         logger.info(f"Updated research plan: {len(updated.steps)} steps")
         return updated
@@ -145,6 +149,7 @@ async def check_progress(
     *,
     llm: LLMProvider,
     model: str | None = None,
+    provider: str | None = None,
 ) -> int:
     """Estimate research completion percentage (0-100)."""
     prompt = RESEARCH_PROGRESS_TEMPLATE.format(
@@ -154,7 +159,7 @@ async def check_progress(
     )
 
     try:
-        result = await llm.call_structured(prompt, ResearchProgress, model=model)
+        result = await llm.call_structured(prompt, ResearchProgress, model=model, provider=provider)
         progress = ResearchProgress(**result).progress
         logger.info(f"Research progress: {progress}%")
         return max(0, min(100, progress))

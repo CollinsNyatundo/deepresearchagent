@@ -12,6 +12,15 @@ Endpoints:
 - POST /runs/{id}/mindmap/expand — Expand mindmap node
 - POST /validate-model   — Validate OpenRouter model ID
 - GET /health            — Health check
+
+Knowledge Graph (Graphify) Endpoints:
+- GET  /runs/{id}/knowledge-graph          — Get knowledge graph JSON
+- GET  /runs/{id}/knowledge-graph/html     — Download interactive graph.html
+- POST /runs/{id}/knowledge-graph/build    — Trigger manual KG build
+- POST /runs/{id}/knowledge-graph/query    — Query the graph via MCP bridge
+- GET  /runs/{id}/knowledge-graph/mcp      — MCP server status
+- POST /runs/{id}/knowledge-graph/mcp/start — Start MCP server
+- POST /runs/{id}/knowledge-graph/mcp/stop  — Stop MCP server
 """
 
 from __future__ import annotations
@@ -30,6 +39,9 @@ from research_engine.config import get_config
 from research_engine.llm.provider import LLMProvider, validate_model_id
 from research_engine.models import (
     ExpandRequest,
+    KGQueryRequest,
+    KGQueryResult,
+    KnowledgeGraph,
     MindmapGraph,
     NodeExpansion,
     PlanApproval,
@@ -39,10 +51,14 @@ from research_engine.models import (
     RunSummary,
 )
 from research_engine.output.storage import (
+    graph_html_available,
+    knowledge_graph_available,
     list_runs,
+    load_knowledge_graph,
     load_mindmap,
     load_report,
     load_run,
+    save_knowledge_graph,
     save_mindmap,
 )
 
@@ -112,7 +128,7 @@ async def start_research(request: ResearchRequest):
     # Validate model if provided
     if request.model:
         try:
-            validate_model_id(request.model)
+            validate_model_id(request.model, provider=request.provider)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
@@ -153,7 +169,7 @@ async def stream_research(request: ResearchRequest):
     # Validate model if provided
     if request.model:
         try:
-            validate_model_id(request.model)
+            validate_model_id(request.model, provider=request.provider)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
@@ -225,7 +241,7 @@ async def generate_plan(request: ResearchRequest):
     model = config.llm.default_model
     if request.model:
         try:
-            model = validate_model_id(request.model)
+            model = validate_model_id(request.model, provider=request.provider)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
@@ -236,13 +252,13 @@ async def generate_plan(request: ResearchRequest):
 
         # Generate the research plan
         plan = await planner_module.create_plan(
-            request.query, llm=llm, model=model
+            request.query, llm=llm, model=model, provider=request.provider
         )
 
         # Decompose query into sub-queries (uses planner module function)
         try:
             sub_queries = await planner_module.decompose_query(
-                request.query, llm=llm, model=model
+                request.query, llm=llm, model=model, provider=request.provider
             )
         except Exception as e:
             logger.warning(f"Query decomposition failed, using original query: {e}")
@@ -276,7 +292,7 @@ async def execute_approved_plan(approval: PlanApproval):
     # Validate model if provided
     if approval.model:
         try:
-            validate_model_id(approval.model)
+            validate_model_id(approval.model, provider=approval.provider)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
@@ -425,27 +441,71 @@ async def export_research(run_id: str, fmt: str):
 
 @app.get("/models")
 async def list_models():
-    """List available OpenRouter model presets and the current default.
+    """List all available model presets across all providers.
 
-    Returns the configured presets from config.toml/defaults, plus any
-    models the user might want to try. Useful for the model selector UI.
+    Returns OpenRouter presets, suggested free models, and the full
+    Groq free-tier preset catalogue. The frontend model selector uses
+    this to populate the dropdown UI with provider-annotated options.
     """
-    presets = config.llm.presets  # e.g. {"nemotron": "nvidia/...", ...}
+    or_presets = config.llm.presets  # OpenRouter presets from config
+    groq_presets = config.llm.groq_presets  # Groq free-tier models
+
     return {
         "default": config.llm.default_model,
+        # OpenRouter configured presets
         "presets": [
-            {"name": name, "id": model_id}
-            for name, model_id in presets.items()
+            {"name": name, "id": model_id, "provider": "openrouter"}
+            for name, model_id in or_presets.items()
         ],
-        # Common free OpenRouter models the user might want
+        # Free OpenRouter models (no API key required beyond OpenRouter key)
         "suggested": [
-            {"name": "Nemotron 120B (Free)",    "id": "nvidia/nemotron-3-super-120b-a12b:free"},
-            {"name": "Qwen 235B (Free)",         "id": "qwen/qwen3-235b-a22b:free"},
-            {"name": "Gemini Flash 1.5 (Free)",  "id": "google/gemini-flash-1.5:free"},
-            {"name": "Llama 3.3 70B (Free)",     "id": "meta-llama/llama-3.3-70b-instruct:free"},
-            {"name": "Mistral 7B (Free)",        "id": "mistralai/mistral-7b-instruct:free"},
-            {"name": "DeepSeek R1 (Free)",       "id": "deepseek/deepseek-r1:free"},
+            {"name": "Nemotron 120B (Free)",         "id": "nvidia/nemotron-3-super-120b-a12b:free", "provider": "openrouter"},
+            {"name": "Qwen3 235B (Free)",             "id": "qwen/qwen3-235b-a22b:free",             "provider": "openrouter"},
+            {"name": "Gemini Flash 1.5 (Free)",       "id": "google/gemini-flash-1.5:free",          "provider": "openrouter"},
+            {"name": "Llama 3.3 70B (Free)",          "id": "meta-llama/llama-3.3-70b-instruct:free","provider": "openrouter"},
+            {"name": "Mistral 7B (Free)",             "id": "mistralai/mistral-7b-instruct:free",    "provider": "openrouter"},
+            {"name": "DeepSeek R1 (Free)",            "id": "deepseek/deepseek-r1:free",             "provider": "openrouter"},
         ],
+        # Groq free-tier models (requires GROQ_API_KEY, use provider='groq')
+        "groq_presets": [
+            {"name": name, "id": model_id, "provider": "groq"}
+            for name, model_id in groq_presets.items()
+        ],
+    }
+
+
+@app.get("/scraper/status")
+async def scraper_status():
+    """Inspect which Scrapling fetcher tiers are available on this server.
+
+    Returns availability for all 4 tiers:
+      async_fetcher         — curl_cffi native async (always available)
+      dynamic_fetcher       — Playwright Chromium JS rendering (needs msgspec)
+      stealthy_patchright   — patchright stealth Chromium (needs patchright)
+      stealthy_camoufox     — Camoufox Firefox (needs camoufox binary fetched)
+
+    Use this to debug missing content — if dynamic_fetcher=false, JS sites
+    will return empty content and you need to install/launch missing deps.
+    """
+    from research_engine.sources.web_scraper import get_fetcher_availability
+
+    availability = get_fetcher_availability()
+    configured_tier = config.scraping.fetcher_tier
+
+    warnings = []
+    if not availability.get("dynamic"):
+        warnings.append("DynamicFetcher unavailable — JS pages will return empty content. Run: pip install msgspec && python -m playwright install chromium")
+    if not availability.get("stealthy_patchright"):
+        warnings.append("StealthyFetcher (patchright) unavailable. Run: pip install patchright")
+    if not availability.get("stealthy_camoufox"):
+        warnings.append("Camoufox unavailable — install with: pip install camoufox && python -m camoufox fetch")
+
+    return {
+        "configured_tier": configured_tier,
+        "availability": availability,
+        "active_tiers": [k for k, v in availability.items() if v],
+        "warnings": warnings,
+        "health": "ok" if availability.get("async") else "degraded",
     }
 
 
@@ -469,3 +529,137 @@ async def validate_model(request: ModelValidationRequest):
 async def health():
     """Health check endpoint."""
     return {"status": "ok", "version": "0.2.0"}
+
+
+# ─── Knowledge Graph (Graphify) ─────────────────────────────────
+
+@app.get("/runs/{run_id}/knowledge-graph", response_model=KnowledgeGraph)
+async def get_knowledge_graph(run_id: str):
+    """Get the Graphify knowledge graph for a run.
+
+    Returns the full node/edge/community data for frontend rendering.
+    Raises 404 if the graph has not been built yet.
+    """
+    if not knowledge_graph_available(run_id):
+        raise HTTPException(
+            status_code=404,
+            detail="Knowledge graph not built for this run. Try POST /runs/{run_id}/knowledge-graph/build",
+        )
+    try:
+        return load_knowledge_graph(run_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/runs/{run_id}/knowledge-graph/html")
+async def get_knowledge_graph_html(run_id: str):
+    """Download the Graphify interactive graph.html for a run."""
+    from pathlib import Path
+    from research_engine.output.storage import DEFAULT_OUTPUT_DIR
+
+    html_path = Path(DEFAULT_OUTPUT_DIR) / run_id / "graph.html"
+    if not html_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Interactive graph.html not available for this run.",
+        )
+    return FileResponse(
+        path=str(html_path),
+        media_type="text/html",
+        filename=f"knowledge_graph_{run_id}.html",
+    )
+
+
+@app.post("/runs/{run_id}/knowledge-graph/build", response_model=KnowledgeGraph)
+async def build_knowledge_graph(run_id: str):
+    """Trigger manual knowledge graph build for an existing run.
+
+    Useful when the run completed before graphify was enabled,
+    or when re-building with a different mode.
+    """
+    from pathlib import Path
+    from research_engine.knowledge_graph import builder as kg_builder
+    from research_engine.output.storage import DEFAULT_OUTPUT_DIR
+
+    try:
+        result = load_run(run_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    run_dir = Path(DEFAULT_OUTPUT_DIR) / run_id
+    try:
+        kg = await kg_builder.build_knowledge_graph(
+            result=result,
+            run_dir=run_dir,
+            graphify_mode=config.graphify.mode,
+        )
+        await save_knowledge_graph(kg, run_id)
+        return kg
+    except Exception as e:
+        logger.error(f"Manual KG build failed for {run_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Knowledge graph build failed: {e}")
+
+
+@app.post("/runs/{run_id}/knowledge-graph/query", response_model=KGQueryResult)
+async def query_knowledge_graph(run_id: str, request: KGQueryRequest):
+    """Query the knowledge graph using the Graphify MCP bridge.
+
+    Returns a graph-traversal answer optimized for token efficiency.
+    The graph must be built first (GET /knowledge-graph to check).
+    """
+    from research_engine.knowledge_graph import mcp_bridge as kg_mcp
+
+    if not knowledge_graph_available(run_id):
+        raise HTTPException(
+            status_code=404,
+            detail="Knowledge graph not found. Build it first.",
+        )
+
+    try:
+        result = await kg_mcp.query_graph(run_id, request)
+        return result
+    except Exception as e:
+        logger.error(f"KG query failed for {run_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Graph query failed: {e}")
+
+
+@app.get("/runs/{run_id}/knowledge-graph/mcp")
+async def get_mcp_status(run_id: str):
+    """Get the MCP server status for a run."""
+    from research_engine.knowledge_graph import mcp_bridge as kg_mcp
+    return kg_mcp.get_server_status(run_id)
+
+
+@app.post("/runs/{run_id}/knowledge-graph/mcp/start")
+async def start_mcp_server(run_id: str):
+    """Start the Graphify MCP server for a run."""
+    from pathlib import Path
+    from research_engine.knowledge_graph import mcp_bridge as kg_mcp
+    from research_engine.output.storage import DEFAULT_OUTPUT_DIR
+
+    kg_json_path = Path(DEFAULT_OUTPUT_DIR) / run_id / "knowledge_graph.json"
+    if not kg_json_path.exists():
+        raise HTTPException(status_code=404, detail="knowledge_graph.json not found.")
+
+    success = await kg_mcp.start_mcp_server(run_id, kg_json_path)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to start MCP server.")
+    return {"status": "started", "run_id": run_id}
+
+
+@app.post("/runs/{run_id}/knowledge-graph/mcp/stop")
+async def stop_mcp_server(run_id: str):
+    """Stop the Graphify MCP server for a run."""
+    from research_engine.knowledge_graph import mcp_bridge as kg_mcp
+    await kg_mcp.stop_mcp_server(run_id)
+    return {"status": "stopped", "run_id": run_id}
+
+
+@app.get("/runs/{run_id}/knowledge-graph/available")
+async def knowledge_graph_status(run_id: str):
+    """Check whether a knowledge graph is available for a run."""
+    return {
+        "run_id": run_id,
+        "knowledge_graph_available": knowledge_graph_available(run_id),
+        "graph_html_available": graph_html_available(run_id),
+    }

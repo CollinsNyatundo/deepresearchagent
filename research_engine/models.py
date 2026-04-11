@@ -11,6 +11,13 @@ from pydantic import BaseModel, Field
 
 # ─── Request / Config ────────────────────────────────────────────────
 
+class ResearchMode(str, Enum):
+    """Research mode indicating the target domain."""
+
+    WEB = "web"
+    GITHUB = "github"
+
+
 class ResearchRequest(BaseModel):
     """Input to start a new research run."""
 
@@ -20,6 +27,8 @@ class ResearchRequest(BaseModel):
     max_pages: int = 5
     enable_crossover: bool = True
     search_provider: str | None = None  # Per-request override
+    provider: str | None = None  # Per-request LLM provider override (e.g. 'groq' or 'openrouter')
+    mode: ResearchMode = ResearchMode.WEB
 
 
 # ─── Research Planning ───────────────────────────────────────────────
@@ -179,6 +188,89 @@ class ExpandRequest(BaseModel):
     model: str | None = None
 
 
+# ─── Knowledge Graph (Graphify Integration) ──────────────────────────
+
+class KGNode(BaseModel):
+    """A node in the Graphify knowledge graph."""
+
+    id: str
+    label: str
+    type: str = "concept"               # function | class | concept | paper | diagram
+    community: int = 0                  # Leiden community ID
+    degree: int = 0                     # Number of edges (higher = more connected)
+    is_god_node: bool = False           # Top-N highest-degree nodes
+    provenance: str = "EXTRACTED"       # EXTRACTED | INFERRED | AMBIGUOUS
+    confidence: float = 1.0            # 0–1 confidence (relevant for INFERRED)
+    summary: str = ""
+    file_path: str = ""                 # Source file (for code nodes)
+
+
+class KGEdge(BaseModel):
+    """An edge in the Graphify knowledge graph."""
+
+    source: str
+    target: str
+    type: str = "semantically_similar_to"  # calls | imports | rationale_for | semantically_similar_to
+    provenance: str = "EXTRACTED"
+    confidence: float = 1.0
+    label: str = ""
+
+
+class KGCommunity(BaseModel):
+    """A Leiden community cluster of related nodes."""
+
+    id: int
+    label: str
+    node_count: int
+    keywords: list[str] = Field(default_factory=list)
+    description: str = ""
+
+
+class SurpriseEdge(BaseModel):
+    """An unexpected cross-domain connection flagged by Graphify."""
+
+    source: str
+    target: str
+    reason: str                         # Plain-English explanation
+    score: float = 0.0                  # Surprise score (higher = more unexpected)
+
+
+class KnowledgeGraph(BaseModel):
+    """Complete knowledge graph produced by Graphify for a research run."""
+
+    run_id: str
+    nodes: list[KGNode] = Field(default_factory=list)
+    edges: list[KGEdge] = Field(default_factory=list)
+    communities: list[KGCommunity] = Field(default_factory=list)
+    god_nodes: list[str] = Field(default_factory=list)     # Node IDs of highest-degree nodes
+    surprise_edges: list[SurpriseEdge] = Field(default_factory=list)
+    built_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    graphify_version: str = ""
+    graph_html_available: bool = False
+    corpus_stats: dict[str, Any] = Field(default_factory=dict)
+    # Token compression stats
+    naive_token_cost: int = 0           # Tokens to read all raw content
+    graph_token_cost: int = 0          # Tokens for a typical BFS query
+    compression_ratio: float = 0.0
+
+
+class KGQueryRequest(BaseModel):
+    """Request to query the knowledge graph via Graphify MCP bridge."""
+
+    question: str
+    mode: str = "bfs"                   # bfs | dfs
+    budget: int = 2000                  # Token budget for response
+
+
+class KGQueryResult(BaseModel):
+    """Result of a knowledge graph query."""
+
+    answer: str
+    nodes_traversed: list[str] = Field(default_factory=list)
+    token_cost: int = 0
+    query_mode: str = "bfs"
+
+
 # ─── SSE Streaming Events (Phase 2) ─────────────────────────────────
 
 class ResearchState(str, Enum):
@@ -288,4 +380,6 @@ class PlanApproval(BaseModel):
     max_pages: int = 5
     enable_crossover: bool = True
     search_provider: str | None = None
+    provider: str | None = None
+    mode: ResearchMode = ResearchMode.WEB
     export_formats: list[str] = Field(default_factory=lambda: ["markdown", "pdf"])

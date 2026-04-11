@@ -7,7 +7,13 @@ import type {
   PlanPreview,
   PlanApproval,
   ExportFormatInfo,
+  KnowledgeGraph,
+  KGQueryRequest,
+  KGQueryResult,
+  KGMcpStatus,
+  KGAvailability,
 } from '../types/api';
+
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -261,4 +267,64 @@ export const api = {
     });
     return res.json();
   },
+
+  // ──── Knowledge Graph (Graphify) ────────────────────────────────────
+
+  /** Get the knowledge graph for a run. Throws 404 if not built. */
+  async getKnowledgeGraph(runId: string): Promise<KnowledgeGraph> {
+    const res = await fetch(`${BASE_URL}/runs/${runId}/knowledge-graph`);
+    return handleResponse<KnowledgeGraph>(res);
+  },
+
+  /** Check KG + graph.html availability for a run (non-throwing). */
+  async getKnowledgeGraphAvailability(runId: string): Promise<KGAvailability> {
+    const res = await fetch(`${BASE_URL}/runs/${runId}/knowledge-graph/available`);
+    return handleResponse<KGAvailability>(res);
+  },
+
+  /** Trigger manual KG build for an existing run. */
+  async buildKnowledgeGraph(runId: string): Promise<KnowledgeGraph> {
+    const res = await fetch(`${BASE_URL}/runs/${runId}/knowledge-graph/build`, {
+      method: 'POST',
+    });
+    return handleResponse<KnowledgeGraph>(res);
+  },
+
+  /** Query the knowledge graph with BFS/DFS traversal. */
+  async queryKnowledgeGraph(runId: string, req: KGQueryRequest): Promise<KGQueryResult> {
+    const res = await fetch(`${BASE_URL}/runs/${runId}/knowledge-graph/query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    });
+    return handleResponse<KGQueryResult>(res);
+  },
+
+  /** Get a direct URL to the interactive graph.html (open in new tab). */
+  getGraphHtmlUrl(runId: string): string {
+    return `${BASE_URL}/runs/${runId}/knowledge-graph/html`;
+  },
+
+  /** Get MCP server status. */
+  async getMcpStatus(runId: string): Promise<KGMcpStatus> {
+    const res = await fetch(`${BASE_URL}/runs/${runId}/knowledge-graph/mcp`);
+    return handleResponse<KGMcpStatus>(res);
+  },
+
+  /** Start Graphify MCP server for a run. */
+  async startMcpServer(runId: string): Promise<{ status: string }> {
+    const res = await fetch(`${BASE_URL}/runs/${runId}/knowledge-graph/mcp/start`, {
+      method: 'POST',
+    });
+    return handleResponse<{ status: string }>(res);
+  },
+
+  /** Stop Graphify MCP server for a run. */
+  async stopMcpServer(runId: string): Promise<{ status: string }> {
+    const res = await fetch(`${BASE_URL}/runs/${runId}/knowledge-graph/mcp/stop`, {
+      method: 'POST',
+    });
+    return handleResponse<{ status: string }>(res);
+  },
 };
+

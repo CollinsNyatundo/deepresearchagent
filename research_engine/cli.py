@@ -47,6 +47,10 @@ def run(
         None, "--search", "-s",
         help="Search provider: duckduckgo, tavily, brave",
     ),
+    provider: str | None = typer.Option(
+        None, "--provider", "-pr",
+        help="LLM provider: openrouter, groq",
+    ),
     max_pages: int = typer.Option(
         5, "--max-pages", "-p",
         help="Max pages to scrape per search query",
@@ -55,6 +59,10 @@ def run(
     no_crossover: bool = typer.Option(
         False, "--no-crossover",
         help="Disable candidate crossover (faster, less thorough)",
+    ),
+    mode: str = typer.Option(
+        "web", "--mode",
+        help="Research mode: 'web' or 'github'",
     ),
     config_path: str | None = typer.Option(
         None, "--config", "-c",
@@ -72,7 +80,7 @@ def run(
     """Run a deep research query and generate a report + mindmap."""
     _setup_logging(verbose)
 
-    from research_engine.models import ResearchRequest
+    from research_engine.models import ResearchRequest, ResearchMode
 
     request = ResearchRequest(
         query=query,
@@ -81,6 +89,8 @@ def run(
         max_pages=max_pages,
         enable_crossover=not no_crossover,
         search_provider=search_provider,
+        provider=provider,
+        mode=ResearchMode(mode) if mode else ResearchMode.WEB,
     )
 
     asyncio.run(_execute_research(request, config_path, output_dir))

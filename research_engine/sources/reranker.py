@@ -67,6 +67,7 @@ async def rerank_results(
     llm: LLMProvider,
     model: str | None = None,
     top_k: int | None = None,
+    provider: str | None = None,
 ) -> list[SearchResult]:
     """Score and reorder search results by relevance using LLM.
 
@@ -96,7 +97,7 @@ async def rerank_results(
     prompt = RERANKING_PROMPT.format(query=query, results_text=results_text)
 
     try:
-        output = await llm.call_structured(prompt, RerankingOutput, model=model)
+        output = await llm.call_structured(prompt, RerankingOutput, model=model, provider=provider)
         if isinstance(output, dict):
             output = RerankingOutput(**output)
 

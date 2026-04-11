@@ -32,6 +32,9 @@ from research_engine.agent import planner as planner_module
 from research_engine.agent import searcher as searcher_module
 from research_engine.agent.retry import reflective_retry
 from research_engine.config import AppConfig, get_config
+from research_engine.knowledge_graph import builder as kg_builder
+from research_engine.knowledge_graph import enricher as kg_enricher
+from research_engine.knowledge_graph import mcp_bridge as kg_mcp
 from research_engine.llm.provider import LLMProvider, validate_model_id
 from research_engine.models import (
     ConfidenceScore,
@@ -45,7 +48,7 @@ from research_engine.models import (
     SearchQuery,
 )
 from research_engine.output.mindmap import build_mindmap_graph
-from research_engine.output.storage import save_run
+from research_engine.output.storage import save_knowledge_graph, save_run
 from research_engine.sources.reranker import rerank_results
 from research_engine.sources.web_scraper import WebScraper
 from research_engine.sources.web_search import get_search_provider
@@ -106,11 +109,18 @@ class DeepResearchOrchestrator:
             "run_id": run_id, "query": request.query,
         })
 
-        model = self._resolve_model(request.model)
-        search_provider = get_search_provider(
-            provider=request.search_provider,
-            config=self.config.search,
-        )
+        model = self._resolve_model(request.model, provider=request.provider)
+        if getattr(request, "mode", "web") == "github":
+            from research_engine.sources.github_search import GitHubSearchProvider, GitHubScraper
+            search_provider = GitHubSearchProvider()
+            scraper = GitHubScraper()
+        else:
+            search_provider = get_search_provider(
+                provider=request.search_provider,
+                config=self.config.search,
+            )
+            scraper = self.scraper
+
         max_cycles = min(request.depth * 6, self.config.research.max_cycles)
 
         console.print(f"\n[bold blue]🔬 Deep Research Agent[/bold blue]")
@@ -125,7 +135,7 @@ class DeepResearchOrchestrator:
         console.print("[yellow]📋 Creating research plan...[/yellow]")
 
         plan = await planner_module.create_plan(
-            request.query, llm=self.llm, model=model
+            request.query, llm=self.llm, model=model, provider=request.provider
         )
 
         # ── Query decomposition ────────────────────────────────────
@@ -133,7 +143,7 @@ class DeepResearchOrchestrator:
             "message": "Decomposing query into sub-queries...",
         })
         sub_queries = await planner_module.decompose_query(
-            request.query, llm=self.llm, model=model
+            request.query, llm=self.llm, model=model, provider=request.provider
         )
         console.print(f"   Sub-queries: {sub_queries}")
 
@@ -150,6 +160,7 @@ class DeepResearchOrchestrator:
             plan=plan,
             model=model,
             search_provider=search_provider,
+            scraper=scraper,
             max_cycles=max_cycles,
             request=request,
             event_queue=event_queue,
@@ -176,11 +187,17 @@ class DeepResearchOrchestrator:
         run_id = _generate_run_id()
         started_at = datetime.now(timezone.utc)
 
-        model = self._resolve_model(approval.model)
-        search_provider = get_search_provider(
-            provider=approval.search_provider,
-            config=self.config.search,
-        )
+        model = self._resolve_model(approval.model, provider=approval.provider)
+        if getattr(approval, "mode", "web") == "github":
+            from research_engine.sources.github_search import GitHubSearchProvider, GitHubScraper
+            search_provider = GitHubSearchProvider()
+            scraper = GitHubScraper()
+        else:
+            search_provider = get_search_provider(
+                provider=approval.search_provider,
+                config=self.config.search,
+            )
+            scraper = self.scraper
 
         max_cycles = min(approval.depth * 6, self.config.research.max_cycles)
 
@@ -214,6 +231,7 @@ class DeepResearchOrchestrator:
             max_pages=approval.max_pages,
             enable_crossover=approval.enable_crossover,
             search_provider=approval.search_provider,
+            provider=approval.provider,
         )
 
         return await self._execute_research_loop(
@@ -223,6 +241,7 @@ class DeepResearchOrchestrator:
             plan=plan,
             model=model,
             search_provider=search_provider,
+            scraper=scraper,
             max_cycles=max_cycles,
             request=request,
             event_queue=event_queue,
@@ -241,6 +260,7 @@ class DeepResearchOrchestrator:
         plan: ResearchPlan,
         model: str,
         search_provider,
+        scraper,
         max_cycles: int,
         request: ResearchRequest,
         event_queue: asyncio.Queue | None,
@@ -273,6 +293,7 @@ class DeepResearchOrchestrator:
                         plan=current_plan,
                         context=context,
                         search_provider=search_provider,
+                        scraper=scraper,
                         model=model,
                         request=request,
                         event_queue=event_queue,
@@ -285,7 +306,7 @@ class DeepResearchOrchestrator:
                     })
                     reflection = await planner_module.reflect_on_plan(
                         query, current_plan, context.get_history_text(),
-                        llm=self.llm, model=model,
+                        llm=self.llm, model=model, provider=request.provider,
                     )
                     step.reflection = reflection
 
@@ -293,7 +314,7 @@ class DeepResearchOrchestrator:
                         current_plan = await planner_module.update_plan(
                             query, current_plan, reflection,
                             context.get_history_text(),
-                            llm=self.llm, model=model,
+                            llm=self.llm, model=model, provider=request.provider,
                         )
                         step.plan_updated = True
                         console.print(f"   [yellow]📝 Plan updated at cycle {cycle + 1}[/yellow]")
@@ -311,7 +332,7 @@ class DeepResearchOrchestrator:
                     if (cycle + 1) % check_interval == 0:
                         final_progress = await planner_module.check_progress(
                             query, current_plan, context.get_history_text(),
-                            llm=self.llm, model=model,
+                            llm=self.llm, model=model, provider=request.provider,
                         )
                         step.progress = final_progress
                         console.print(f"   [green]📊 Progress: {final_progress}%[/green]")
@@ -341,7 +362,7 @@ class DeepResearchOrchestrator:
             "message": "Writing final report...",
         })
         console.print("\n[yellow]📝 Writing final report...[/yellow]")
-        report = await self._generate_report(query, current_plan, context, model=model)
+        report = await self._generate_report(query, current_plan, context, model=model, provider=request.provider)
 
         # ── Build result ───────────────────────────────────────────
         all_citations = context.get_all_citations()
@@ -367,6 +388,59 @@ class DeepResearchOrchestrator:
         mindmap = build_mindmap_graph(result)
         console.print("[yellow]💾 Saving results...[/yellow]")
         output_path = await save_run(result, mindmap)
+
+        # ── Strategy A + C: Build Knowledge Graph (if graphify enabled) ──
+        if self.config.graphify.enabled:
+            try:
+                console.print("[yellow]🕸 Building knowledge graph...[/yellow]")
+
+                # Strategy C: collect ArXiv/PDF URLs from all scraped pages
+                scraped_urls: list[str] = [
+                    page.url
+                    for step in result.steps
+                    for page in step.scraped_pages
+                    if page.url
+                ]
+                paper_urls = [
+                    url for url in scraped_urls
+                    if "arxiv.org" in url or url.lower().endswith(".pdf")
+                ]
+
+                if paper_urls:
+                    await self._emit(event_queue, "knowledge_graph_build", {
+                        "run_id": run_id,
+                        "message": f"Enriching corpus with {len(paper_urls)} papers...",
+                    })
+
+                kg = await kg_builder.build_knowledge_graph(
+                    result=result,
+                    run_dir=output_path,
+                    graphify_mode=self.config.graphify.mode,
+                )
+                await save_knowledge_graph(kg, run_id)
+
+                # Strategy B: start MCP server for interactive graph queries
+                if self.config.graphify.mcp_enabled and kg.graph_html_available:
+                    kg_json_path = output_path / "knowledge_graph.json"
+                    await kg_mcp.start_mcp_server(run_id, kg_json_path)
+
+                await self._emit(event_queue, "knowledge_graph_ready", {
+                    "run_id": run_id,
+                    "node_count": len(kg.nodes),
+                    "edge_count": len(kg.edges),
+                    "community_count": len(kg.communities),
+                    "god_nodes": kg.god_nodes[:5],
+                    "compression_ratio": kg.compression_ratio,
+                    "graph_html_available": kg.graph_html_available,
+                })
+                console.print(
+                    f"   [bold cyan]✓ Knowledge graph ready![/bold cyan] "
+                    f"{len(kg.nodes)} nodes, {len(kg.edges)} edges, "
+                    f"{len(kg.communities)} communities"
+                )
+            except Exception as kg_err:
+                logger.error(f"Knowledge graph build failed: {kg_err}")
+                console.print(f"   [yellow]⚠ Knowledge graph unavailable: {kg_err}[/yellow]")
 
         duration = (completed_at - started_at).total_seconds()
         console.print(
@@ -402,6 +476,7 @@ class DeepResearchOrchestrator:
         plan: ResearchPlan,
         context: ctx_module.ResearchContext,
         search_provider,
+        scraper,
         model: str,
         request: ResearchRequest,
         event_queue: asyncio.Queue | None = None,
@@ -419,7 +494,7 @@ class DeepResearchOrchestrator:
         """
         # ── Generate search query ──────────────────────────────────
         query = await searcher_module.generate_query(
-            topic, plan, context.get_history_text(), llm=self.llm, model=model
+            topic, plan, context.get_history_text(), llm=self.llm, model=model, provider=request.provider
         )
         console.print(f"   🔍 Query: {query.query}")
 
@@ -435,7 +510,7 @@ class DeepResearchOrchestrator:
             search_results, scraped_pages = await searcher_module.search_and_scrape(
                 query,
                 search_provider=search_provider,
-                scraper=self.scraper,
+                scraper=scraper,
                 max_pages=request.max_pages,
             )
         except Exception as e:
@@ -457,6 +532,7 @@ class DeepResearchOrchestrator:
                 },
                 llm=self.llm,
                 model=model,
+                provider=request.provider,
                 retry_count=0,
             )
 
@@ -470,7 +546,7 @@ class DeepResearchOrchestrator:
                     search_results, scraped_pages = await searcher_module.search_and_scrape(
                         query,
                         search_provider=search_provider,
-                        scraper=self.scraper,
+                        scraper=scraper,
                         max_pages=request.max_pages,
                     )
                 except Exception as retry_err:
@@ -485,6 +561,7 @@ class DeepResearchOrchestrator:
                     query.query, search_results,
                     llm=self.llm, model=model,
                     top_k=request.max_pages * 2,
+                    provider=request.provider,
                 )
             except Exception as e:
                 logger.warning(f"Reranking failed, using original order: {e}")
@@ -522,12 +599,12 @@ class DeepResearchOrchestrator:
 
         if request.enable_crossover and len(valid_pages) > 0:
             answer = await crossover_module.answer_with_crossover(
-                topic, query, valid_pages, llm=self.llm, model=model,
+                topic, query, valid_pages, llm=self.llm, model=model, provider=request.provider,
                 num_candidates=self.config.research.crossover_candidates,
             )
         else:
             answer = await searcher_module.synthesize_answer(
-                topic, query, valid_pages, llm=self.llm, model=model
+                topic, query, valid_pages, llm=self.llm, model=model, provider=request.provider
             )
 
         console.print(f"   ✅ Answer: {len(answer.answer)} chars, {len(answer.citations)} citations")
@@ -539,6 +616,7 @@ class DeepResearchOrchestrator:
             answer=answer.answer,
             source_count=len(valid_pages),
             model=model,
+            provider=request.provider,
         )
 
         # Emit confidence score for frontend visualization
@@ -581,6 +659,7 @@ class DeepResearchOrchestrator:
         answer: str,
         source_count: int,
         model: str,
+        provider: str | None = None,
     ) -> ConfidenceScore:
         """Use LLM to self-assess answer confidence (Protocol-H pattern).
 
@@ -602,7 +681,7 @@ class DeepResearchOrchestrator:
 
         try:
             result = await self.llm.call_structured(
-                prompt, ConfidenceScore, model=model
+                prompt, ConfidenceScore, model=model, provider=provider
             )
             if isinstance(result, dict):
                 return ConfidenceScore(**result)
@@ -626,6 +705,7 @@ class DeepResearchOrchestrator:
         plan: ResearchPlan,
         context: ctx_module.ResearchContext,
         model: str,
+        provider: str | None = None,
     ) -> str:
         """Generate the final Markdown report from all research findings."""
         from research_engine.llm.prompts import REPORT_WRITER_TEMPLATE
@@ -636,7 +716,7 @@ class DeepResearchOrchestrator:
         )
 
         try:
-            return await self.llm.call(prompt, model=model)
+            return await self.llm.call(prompt, model=model, provider=provider)
         except Exception as e:
             logger.error(f"Report generation failed: {e}")
             return f"# Research Report: {topic}\n\n{context.get_history_text()}"
@@ -645,10 +725,10 @@ class DeepResearchOrchestrator:
     # Helpers
     # ═════════════════════════════════════════════════════════════════
 
-    def _resolve_model(self, model: str | None) -> str:
+    def _resolve_model(self, model: str | None, provider: str | None = None) -> str:
         """Resolve model — per-request override or config default."""
         if model:
-            return validate_model_id(model)
+            return validate_model_id(model, provider=provider)
         return self.config.llm.default_model
 
     async def _emit(
