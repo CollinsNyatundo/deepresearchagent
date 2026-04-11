@@ -367,6 +367,37 @@ export const api = {
     const res = await fetch(url);
     return handleResponse(res);
   },
+
+  // ──── GitNexus Web UI Bridge (gitnexus serve) ─────────────────────
+
+  /** Start `npx gitnexus serve` on port 4747 so the GitNexus web UI can connect. */
+  async startGitnexusServe(): Promise<{
+    status: string;
+    port: number;
+    pid: number;
+    web_ui_url: string;
+    message: string;
+  }> {
+    const res = await fetch(`${BASE_URL}/gitnexus/serve/start`, { method: 'POST' });
+    return handleResponse(res);
+  },
+
+  /** Stop the running `npx gitnexus serve` process. */
+  async stopGitnexusServe(): Promise<{ status: string; pid?: number; message?: string }> {
+    const res = await fetch(`${BASE_URL}/gitnexus/serve/stop`, { method: 'POST' });
+    return handleResponse(res);
+  },
+
+  /** Check if `npx gitnexus serve` is running and get its PID and port. */
+  async getGitnexusServeStatus(): Promise<{
+    running: boolean;
+    pid: number | null;
+    port: number;
+    web_ui_url: string;
+  }> {
+    const res = await fetch(`${BASE_URL}/gitnexus/serve/status`);
+    return handleResponse(res);
+  },
 };
 
 

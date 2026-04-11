@@ -93,14 +93,24 @@ app = FastAPI(
     lifespan=_lifespan,
 )
 
-# CORS for frontend (default: http://localhost:5173)
+# CORS for frontend (default: http://localhost:5173) and GitNexus Web UI
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=config.api.cors_origins,
+    allow_origins=[
+        *config.api.cors_origins,
+        "https://gitnexus.vercel.app",
+        "http://localhost:4747",
+        "http://127.0.0.1:4747",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ─── GitNexus serve process manager ──────────────────────────────────
+# Holds the asyncio subprocess for `npx gitnexus serve --port 4747`.
+# Only one serve process is allowed at a time.
+_gitnexus_serve_proc: asyncio.subprocess.Process | None = None
 
 
 # ─── Run Listing & Retrieval ─────────────────────────────────────────
@@ -821,3 +831,107 @@ async def get_gitnexus_status(repo: str | None = None):
         result["repos"] = repo_states
 
     return result
+
+
+# ─── GitNexus Web UI Bridge (gitnexus serve) ──────────────────────────────────
+# These endpoints manage the `npx gitnexus serve` subprocess that bridges the
+# official GitNexus Web UI (https://gitnexus.vercel.app) to the local codebase.
+# The web UI auto-detects the local server on port 4747.
+
+@app.post("/gitnexus/serve/start")
+async def start_gitnexus_serve(port: int = 4747):
+    """Start `npx gitnexus serve` so the GitNexus web UI can connect.
+
+    The official GitNexus web UI at https://gitnexus.vercel.app polls
+    localhost:4747 for a heartbeat. Running this endpoint starts the bridge.
+
+    Query params:
+        port: Port for the serve process (default: 4747).
+    """
+    global _gitnexus_serve_proc  # noqa: PLW0603
+
+    if _gitnexus_serve_proc is not None and _gitnexus_serve_proc.returncode is None:
+        return {
+            "status": "already_running",
+            "port": port,
+            "pid": _gitnexus_serve_proc.pid,
+            "message": f"gitnexus serve is already running on port {port}.",
+        }
+
+    try:
+        from pathlib import Path
+        project_root = Path(__file__).parent.parent
+
+        _gitnexus_serve_proc = await asyncio.create_subprocess_exec(
+            "npx", "gitnexus", "serve", "--port", str(port), "--host", "127.0.0.1",
+            cwd=str(project_root),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        # Give it a moment to come up
+        await asyncio.sleep(1.5)
+
+        if _gitnexus_serve_proc.returncode is not None:
+            stderr = await _gitnexus_serve_proc.stderr.read() if _gitnexus_serve_proc.stderr else b""
+            raise RuntimeError(
+                f"gitnexus serve exited immediately (code {_gitnexus_serve_proc.returncode}): "
+                + stderr.decode(errors="replace")[:300]
+            )
+
+        logger.info("GitNexus serve started on port %d (PID %d)", port, _gitnexus_serve_proc.pid)
+        return {
+            "status": "started",
+            "port": port,
+            "pid": _gitnexus_serve_proc.pid,
+            "web_ui_url": f"https://gitnexus.vercel.app",
+            "message": f"gitnexus serve is running on port {port}. Open https://gitnexus.vercel.app in your browser.",
+        }
+    except Exception as e:
+        _gitnexus_serve_proc = None
+        logger.error("Failed to start gitnexus serve: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to start gitnexus serve: {e}")
+
+
+@app.post("/gitnexus/serve/stop")
+async def stop_gitnexus_serve():
+    """Stop the running `npx gitnexus serve` process."""
+    global _gitnexus_serve_proc  # noqa: PLW0603
+
+    if _gitnexus_serve_proc is None or _gitnexus_serve_proc.returncode is not None:
+        _gitnexus_serve_proc = None
+        return {"status": "not_running", "message": "gitnexus serve is not running."}
+
+    try:
+        _gitnexus_serve_proc.terminate()
+        try:
+            await asyncio.wait_for(_gitnexus_serve_proc.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
+            _gitnexus_serve_proc.kill()
+        pid = _gitnexus_serve_proc.pid
+        _gitnexus_serve_proc = None
+        logger.info("GitNexus serve stopped (PID %d)", pid)
+        return {"status": "stopped", "pid": pid}
+    except Exception as e:
+        logger.error("Error stopping gitnexus serve: %s", e)
+        raise HTTPException(status_code=500, detail=f"Error stopping gitnexus serve: {e}")
+
+
+@app.get("/gitnexus/serve/status")
+async def gitnexus_serve_status():
+    """Check whether `npx gitnexus serve` is currently running.
+
+    Returns the PID, port, and a direct link to the GitNexus web UI.
+    The frontend polls this to update the 'Connect' button state.
+    """
+    global _gitnexus_serve_proc  # noqa: PLW0603
+
+    running = _gitnexus_serve_proc is not None and _gitnexus_serve_proc.returncode is None
+    if not running:
+        _gitnexus_serve_proc = None  # clean up dead reference
+
+    return {
+        "running": running,
+        "pid": _gitnexus_serve_proc.pid if running else None,
+        "port": 4747,
+        "web_ui_url": "https://gitnexus.vercel.app",
+    }
