@@ -876,11 +876,15 @@ async def start_gitnexus_serve(port: int = 4747):
         }
 
     try:
+        import sys
         from pathlib import Path
         project_root = Path(__file__).parent.parent
 
+        # On Windows npx is a .cmd script — must run via cmd /c
+        npx_cmd = ["cmd", "/c", "npx"] if sys.platform == "win32" else ["npx"]
+
         _gitnexus_serve_proc = await asyncio.create_subprocess_exec(
-            "npx", "gitnexus", "serve", "--port", str(port), "--host", "127.0.0.1",
+            *npx_cmd, "gitnexus", "serve", "--port", str(port), "--host", "127.0.0.1",
             cwd=str(project_root),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
