@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useDisclosure } from '@mantine/hooks';
 import {
   AppShell,
@@ -88,6 +88,27 @@ export default function App() {
 
   // Global view: 'research' | 'code-arch'
   const [globalView, setGlobalView] = useState<'research' | 'code-arch'>('research');
+
+  // GitNexus repo selection
+  const [gitnexusRepos, setGitnexusRepos] = useState<string[]>([]);
+  const [selectedGitnexusRepo, setSelectedGitnexusRepo] = useState<string | null>(null);
+  const [gitnexusReposLoading, setGitnexusReposLoading] = useState(false);
+
+  // Load repo list when switching to Code Arch view
+  useEffect(() => {
+    if (globalView !== 'code-arch') return;
+    setGitnexusReposLoading(true);
+    api.listGitnexusRepos()
+      .then(({ repos }) => {
+        setGitnexusRepos(repos);
+        if (repos.length > 0 && !selectedGitnexusRepo) {
+          setSelectedGitnexusRepo(repos[0]);
+        }
+      })
+      .catch(() => setGitnexusRepos([]))
+      .finally(() => setGitnexusReposLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [globalView]);
 
   // App state machine
   const [appState, setAppState] = useState<AppState>('idle');
@@ -354,12 +375,27 @@ export default function App() {
             </>
           )}
           {globalView === 'code-arch' && (
-            <Stack gap="xs">
-              <Text size="sm" c="dimmed" ta="center" pt="sm">
+            <Stack gap="sm">
+              <Text size="xs" fw={600} c="dimmed">REPOSITORY</Text>
+              {gitnexusReposLoading ? (
+                <Loader size="xs" />
+              ) : gitnexusRepos.length === 0 ? (
+                <Text size="xs" c="red">
+                  Eval-server not running.<br />
+                  Start with:<br />
+                  <code>npx gitnexus eval-server --port 4848</code>
+                </Text>
+              ) : (
+                <Select
+                  size="sm"
+                  placeholder="Select repo…"
+                  data={gitnexusRepos.map((r) => ({ value: r, label: r }))}
+                  value={selectedGitnexusRepo}
+                  onChange={setSelectedGitnexusRepo}
+                />
+              )}
+              <Text size="xs" c="dimmed">
                 GitNexus codebase intelligence — refreshes every 30 min automatically.
-              </Text>
-              <Text size="xs" c="dimmed" ta="center">
-                Or trigger manually via API POST /gitnexus/analyze
               </Text>
             </Stack>
           )}
@@ -499,13 +535,27 @@ export default function App() {
             <Group>
               <IconCode size={24} color="var(--mantine-color-violet-6)" />
               <Title order={3}>Code Architecture</Title>
-              <Badge variant="light" color="violet">GitNexus</Badge>
+              {selectedGitnexusRepo && (
+                <Badge variant="light" color="violet">{selectedGitnexusRepo}</Badge>
+              )}
+              <Badge variant="outline" color="gray">GitNexus</Badge>
             </Group>
             <Text c="dimmed" size="sm">
               Interactive codebase topology — nodes are Files, Classes, and Functions;
               edges are CALLS, IMPORTS, EXTENDS relationships extracted from the live code graph.
+              {!selectedGitnexusRepo && ' Select a repository from the sidebar to begin.'}
             </Text>
-            <KnowledgeGraphView runId="gitnexus" />
+            {selectedGitnexusRepo ? (
+              <KnowledgeGraphView
+                runId={`gitnexus:${selectedGitnexusRepo}`}
+                gitnexusRepo={selectedGitnexusRepo}
+              />
+            ) : (
+              <Stack align="center" justify="center" style={{ height: '40vh' }} gap="lg">
+                <IconCode size={48} color="var(--mantine-color-dimmed)" />
+                <Text c="dimmed">No repository selected. Choose one from the sidebar.</Text>
+              </Stack>
+            )}
           </Stack>
         )}
       </AppShell.Main>

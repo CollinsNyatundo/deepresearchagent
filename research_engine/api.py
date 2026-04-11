@@ -683,13 +683,38 @@ async def knowledge_graph_status(run_id: str):
 
 # ─── GitNexus Code Architecture ──────────────────────────────────────────────
 
+@app.get("/gitnexus/repos")
+async def list_gitnexus_repos():
+    """Return repository names currently indexed in the GitNexus eval-server.
+
+    The frontend calls this to populate the repo-selector dropdown in the
+    Code Architecture panel. Each name can then be passed as the ``repo``
+    query param to the other /gitnexus/* endpoints.
+    """
+    from research_engine.knowledge_graph.gitnexus_bridge import (
+        is_eval_server_running,
+        list_indexed_repos,
+    )
+
+    if not await is_eval_server_running():
+        return {"repos": [], "eval_server_running": False}
+
+    repos = await list_indexed_repos()
+    return {"repos": repos, "eval_server_running": True}
+
+
 @app.get("/gitnexus/graph", response_model=KnowledgeGraph)
-async def get_gitnexus_graph():
-    """Serve the cached GitNexus codebase architecture as a KnowledgeGraph.
+async def get_gitnexus_graph(repo: str):
+    """Serve the cached GitNexus codebase architecture for *repo*.
 
     The graph is rebuilt periodically by the background scheduler
     (every 30 min by default). If no cached graph exists yet, this
-    endpoint triggers a synchronous build first.
+    endpoint triggers a synchronous build on the first request.
+
+    Query params:
+        repo: Repository name as indexed in GitNexus
+              (e.g. "DeepResearchAgent", "ComplianceGaurd").
+              Use GET /gitnexus/repos to discover available names.
     """
     from research_engine.knowledge_graph.gitnexus_bridge import (
         build_and_save,
@@ -697,7 +722,10 @@ async def get_gitnexus_graph():
         load_cached_graph,
     )
 
-    kg = load_cached_graph()
+    if not repo:
+        raise HTTPException(status_code=422, detail="'repo' query parameter is required.")
+
+    kg = load_cached_graph(repo)
     if kg is not None:
         return kg
 
@@ -706,55 +734,90 @@ async def get_gitnexus_graph():
         raise HTTPException(
             status_code=503,
             detail=(
-                "GitNexus graph not yet built and eval-server is not running. "
+                f"GitNexus graph for '{repo}' not yet built and eval-server is not running. "
                 "Start it with: npx gitnexus eval-server --port 4848"
             ),
         )
 
     try:
-        await build_and_save()
-        kg = load_cached_graph()
+        await build_and_save(repo)
+        kg = load_cached_graph(repo)
         if kg is None:
             raise RuntimeError("Graph build succeeded but file is unreadable.")
         return kg
     except Exception as e:
-        logger.error("GitNexus graph build failed: %s", e)
+        logger.error("GitNexus graph build failed for '%s': %s", repo, e)
         raise HTTPException(status_code=500, detail=f"Graph build failed: {e}")
 
 
 @app.post("/gitnexus/analyze")
-async def trigger_gitnexus_analyze():
+async def trigger_gitnexus_analyze(repo: str | None = None):
     """Trigger npx gitnexus analyze + graph rebuild asynchronously.
 
-    Returns immediately — the analysis runs in the background.
-    """
-    from research_engine.gitnexus_scheduler import _refresh_graph  # noqa: PLC2701
+    Query params:
+        repo: Optional. Rebuild only this repo's graph after analysis.
+              If omitted, all indexed repos are refreshed.
 
-    asyncio.create_task(_refresh_graph())
-    return {"status": "analyze_triggered", "message": "Running in background — poll /gitnexus/status for completion."}
+    Returns immediately — the heavy work runs in the background.
+    """
+    from research_engine.gitnexus_scheduler import _refresh_all_repos, refresh_repo  # noqa: PLC2701
+
+    if repo:
+        asyncio.create_task(refresh_repo(repo))
+        return {
+            "status": "analyze_triggered",
+            "repo": repo,
+            "message": f"Rebuilding graph for '{repo}' in background.",
+        }
+    else:
+        asyncio.create_task(_refresh_all_repos())
+        return {
+            "status": "analyze_triggered",
+            "repo": "all",
+            "message": "Re-indexing and refreshing all repos in background.",
+        }
 
 
 @app.get("/gitnexus/status")
-async def get_gitnexus_status():
-    """Report the eval-server reachability, scheduler state, and cached graph age."""
+async def get_gitnexus_status(repo: str | None = None):
+    """Report the eval-server reachability, scheduler state, and cached graph age.
+
+    Query params:
+        repo: Optional. If provided, also returns per-repo cache info.
+    """
     from research_engine.gitnexus_scheduler import is_scheduler_running
     from research_engine.knowledge_graph.gitnexus_bridge import (
-        GRAPH_OUTPUT_PATH,
+        cache_age_seconds,
+        graph_output_path,
         is_eval_server_running,
+        list_indexed_repos,
     )
 
     eval_up = await is_eval_server_running()
-    graph_exists = GRAPH_OUTPUT_PATH.exists()
-    graph_age_seconds: float | None = None
+    available_repos = await list_indexed_repos() if eval_up else []
 
-    if graph_exists:
-        import time
-        graph_age_seconds = round(time.time() - GRAPH_OUTPUT_PATH.stat().st_mtime, 1)
-
-    return {
+    result: dict = {
         "eval_server_running": eval_up,
         "scheduler_running": is_scheduler_running(),
-        "graph_cached": graph_exists,
-        "graph_age_seconds": graph_age_seconds,
-        "graph_path": str(GRAPH_OUTPUT_PATH),
+        "available_repos": available_repos,
     }
+
+    if repo:
+        age = cache_age_seconds(repo)
+        result["repo"] = repo
+        result["graph_cached"] = age is not None
+        result["graph_age_seconds"] = round(age, 1) if age is not None else None
+        result["graph_path"] = str(graph_output_path(repo))
+    else:
+        repo_states = []
+        for r in available_repos:
+            age = cache_age_seconds(r)
+            repo_states.append({
+                "repo": r,
+                "graph_cached": age is not None,
+                "graph_age_seconds": round(age, 1) if age is not None else None,
+                "graph_path": str(graph_output_path(r)),
+            })
+        result["repos"] = repo_states
+
+    return result
