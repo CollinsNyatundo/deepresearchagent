@@ -1,0 +1,498 @@
+import { useState, useCallback, useRef } from 'react';
+import { useDisclosure } from '@mantine/hooks';
+import {
+  AppShell,
+  Burger,
+  Group,
+  Title,
+  Text,
+  Tabs,
+  Stack,
+  Button,
+  Modal,
+  TextInput,
+  Textarea,
+  Slider,
+  Tooltip,
+  Badge,
+  Notification,
+  Select,
+  Loader,
+} from '@mantine/core';
+import {
+  IconFlask,
+  IconMap,
+  IconFileText,
+  IconPlus,
+  IconBrain,
+  IconDownload,
+  IconListCheck,
+} from '@tabler/icons-react';
+
+import { RunList } from './components/runs/RunList';
+import { ReportView } from './components/views/ReportView';
+import { MindmapView } from './components/views/MindmapView';
+import { ResearchProgress } from './components/views/ResearchProgress';
+import { PlanReview } from './components/views/PlanReview';
+import { ExportPanel } from './components/views/ExportPanel';
+import { api } from './api/client';
+import type { ResearchEvent, PlanPreview } from './types/api';
+
+const MODEL_PRESETS = [
+  {
+    value: 'nvidia/nemotron-3-super-120b-a12b:free',
+    label: 'Nemotron 3 Super — 1M ctx, agents',
+  },
+  {
+    value: 'openai/gpt-oss-120b:free',
+    label: 'GPT-OSS 120B — general reasoning',
+  },
+  {
+    value: 'qwen/qwen3-235b-a22b:free',
+    label: 'Qwen 3 235B — RAG + tools',
+  },
+];
+
+type AppState =
+  | 'idle'           // No research selected
+  | 'modal'          // New research modal open (query input)
+  | 'plan_loading'   // Generating plan
+  | 'plan_review'    // User reviewing/editing plan
+  | 'streaming'      // Research in progress with SSE
+  | 'results';       // Viewing completed results
+
+export default function App() {
+  const [navOpened, { toggle: toggleNav }] = useDisclosure(true);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<string | null>('report');
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  // App state machine
+  const [appState, setAppState] = useState<AppState>('idle');
+
+  // New research modal
+  const [modalOpen, { open: openModal, close: closeModal }] = useDisclosure(false);
+  const [query, setQuery] = useState('');
+  const [model, setModel] = useState('nvidia/nemotron-3-super-120b-a12b:free');
+  const [depth, setDepth] = useState(5);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Plan review state (Phase 4)
+  const [planPreview, setPlanPreview] = useState<PlanPreview | null>(null);
+  const [planQuery, setPlanQuery] = useState('');
+
+  // SSE streaming state (Phase 2)
+  const [streamEvents, setStreamEvents] = useState<ResearchEvent[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // ─── Generate Plan (Phase 4) ──────────────────────────────
+  const handleGeneratePlan = useCallback(async () => {
+    if (!query.trim()) return;
+    setIsSubmitting(true);
+    setError(null);
+    setAppState('plan_loading');
+
+    try {
+      const preview = await api.generatePlan({
+        query: query.trim(),
+        model,
+        depth,
+      });
+      setPlanPreview(preview);
+      setPlanQuery(query.trim());
+      setAppState('plan_review');
+      closeModal();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Plan generation failed');
+      setAppState('modal');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [query, model, depth, closeModal]);
+
+  // ─── Approve & Start Research with SSE (Phase 2 + Phase 4) ─
+  const handleApproveAndStart = useCallback(
+    (steps: string[], subQueries: string[], exportFormats: string[]) => {
+      setStreamEvents([]);
+      setIsStreaming(true);
+      setAppState('streaming');
+      setActiveTab('progress');
+
+      const controller = api.streamApprovedPlan(
+        {
+          query: planQuery,
+          plan: { steps },
+          sub_queries: subQueries,
+          model,
+          depth,
+          export_formats: exportFormats,
+        },
+        // onEvent
+        (event) => {
+          setStreamEvents((prev) => [...prev, event]);
+        },
+        // onDone
+        (data) => {
+          setIsStreaming(false);
+          if (data.run_id) {
+            setSelectedRunId(data.run_id);
+            setRefreshKey((k) => k + 1);
+            setActiveTab('report');
+            setAppState('results');
+          }
+        },
+        // onError
+        (errorMsg) => {
+          setIsStreaming(false);
+          setError(errorMsg);
+        },
+      );
+
+      abortRef.current = controller;
+    },
+    [planQuery, model, depth],
+  );
+
+  // ─── Quick Start (no plan review — direct SSE stream) ─────
+  const handleQuickStart = useCallback(async () => {
+    if (!query.trim()) return;
+    setIsSubmitting(true);
+    setError(null);
+    closeModal();
+    setStreamEvents([]);
+    setIsStreaming(true);
+    setAppState('streaming');
+    setActiveTab('progress');
+
+    const controller = api.streamResearch(
+      {
+        query: query.trim(),
+        model,
+        depth,
+      },
+      (event) => {
+        setStreamEvents((prev) => [...prev, event]);
+      },
+      (data) => {
+        setIsStreaming(false);
+        setIsSubmitting(false);
+        if (data.run_id) {
+          setSelectedRunId(data.run_id);
+          setRefreshKey((k) => k + 1);
+          setActiveTab('report');
+          setAppState('results');
+        }
+      },
+      (errorMsg) => {
+        setIsStreaming(false);
+        setIsSubmitting(false);
+        setError(errorMsg);
+      },
+    );
+
+    abortRef.current = controller;
+    setQuery('');
+  }, [query, model, depth, closeModal]);
+
+  // ─── Reset to idle ────────────────────────────────────────
+  const resetToIdle = useCallback(() => {
+    setPlanPreview(null);
+    setPlanQuery('');
+    setStreamEvents([]);
+    setIsStreaming(false);
+    setAppState('idle');
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+  }, []);
+
+  return (
+    <AppShell
+      header={{ height: 60 }}
+      navbar={{
+        width: 300,
+        breakpoint: 'sm',
+        collapsed: { mobile: !navOpened },
+      }}
+      padding="md"
+    >
+      {/* ─── Header ─────────────────────────────────────────── */}
+      <AppShell.Header>
+        <Group h="100%" px="md" justify="space-between">
+          <Group>
+            <Burger
+              opened={navOpened}
+              onClick={toggleNav}
+              hiddenFrom="sm"
+              size="sm"
+            />
+            <IconBrain size={30} color="var(--mantine-color-indigo-6)" />
+            <Title order={3} visibleFrom="xs">
+              Deep Research Agent
+            </Title>
+          </Group>
+          <Group>
+            {isStreaming && (
+              <Badge variant="dot" color="green" size="lg">
+                Researching...
+              </Badge>
+            )}
+            <Badge variant="light" color="indigo" size="lg">
+              {model.split('/').pop()?.replace(/:.*$/, '') || 'model'}
+            </Badge>
+          </Group>
+        </Group>
+      </AppShell.Header>
+
+      {/* ─── Sidebar ────────────────────────────────────────── */}
+      <AppShell.Navbar p="md">
+        <Stack gap="sm" style={{ height: '100%' }}>
+          <Button
+            fullWidth
+            leftSection={<IconPlus size={18} />}
+            onClick={() => {
+              resetToIdle();
+              openModal();
+            }}
+            variant="gradient"
+            gradient={{ from: 'indigo', to: 'violet', deg: 135 }}
+          >
+            New Research
+          </Button>
+          <RunList
+            key={refreshKey}
+            selectedRunId={selectedRunId}
+            onSelectRun={(id) => {
+              resetToIdle();
+              setSelectedRunId(id);
+              setActiveTab('report');
+              setAppState('results');
+            }}
+          />
+        </Stack>
+      </AppShell.Navbar>
+
+      {/* ─── Main Content ───────────────────────────────────── */}
+      <AppShell.Main>
+        {/* Plan Review Mode */}
+        {appState === 'plan_review' && planPreview && (
+          <PlanReview
+            preview={planPreview}
+            query={planQuery}
+            onApprove={handleApproveAndStart}
+            onRegenerate={() => {
+              setAppState('modal');
+              openModal();
+            }}
+            isLoading={isSubmitting}
+          />
+        )}
+
+        {/* Plan Loading */}
+        {appState === 'plan_loading' && (
+          <Stack align="center" justify="center" style={{ height: '60vh' }}>
+            <Loader size="xl" color="indigo" />
+            <Title order={3} c="dimmed">
+              Generating Research Plan...
+            </Title>
+            <Text c="dimmed">The AI is creating a comprehensive plan for your query.</Text>
+          </Stack>
+        )}
+
+        {/* SSE Streaming Mode */}
+        {appState === 'streaming' && (
+          <ResearchProgress events={streamEvents} isActive={isStreaming} />
+        )}
+
+        {/* Results Mode (existing tabs) */}
+        {(appState === 'results' || appState === 'idle') && selectedRunId && (
+          <Stack gap="md">
+            <Tabs value={activeTab} onChange={setActiveTab}>
+              <Tabs.List>
+                <Tabs.Tab
+                  value="report"
+                  leftSection={<IconFileText size={16} />}
+                >
+                  Report
+                </Tabs.Tab>
+                <Tabs.Tab
+                  value="mindmap"
+                  leftSection={<IconMap size={16} />}
+                >
+                  Mindmap
+                </Tabs.Tab>
+                <Tabs.Tab
+                  value="export"
+                  leftSection={<IconDownload size={16} />}
+                >
+                  Export
+                </Tabs.Tab>
+              </Tabs.List>
+
+              <Tabs.Panel value="report" pt="md">
+                <ReportView runId={selectedRunId} />
+              </Tabs.Panel>
+              <Tabs.Panel value="mindmap" pt="md">
+                <MindmapView runId={selectedRunId} />
+              </Tabs.Panel>
+              <Tabs.Panel value="export" pt="md">
+                <ExportPanel runId={selectedRunId} />
+              </Tabs.Panel>
+            </Tabs>
+          </Stack>
+        )}
+
+        {/* Idle — no run selected */}
+        {appState === 'idle' && !selectedRunId && (
+          <Stack align="center" justify="center" style={{ height: '60vh' }}>
+            <IconFlask size={80} color="var(--mantine-color-gray-3)" stroke={1} />
+            <Title order={2} c="dimmed">
+              Deep Research Agent
+            </Title>
+            <Text c="dimmed" ta="center" maw={500} size="lg">
+              Select a past research run from the sidebar, or start a new
+              exhaustive research with the button above.
+            </Text>
+            <Button
+              size="lg"
+              variant="gradient"
+              gradient={{ from: 'indigo', to: 'violet', deg: 135 }}
+              leftSection={<IconPlus size={20} />}
+              onClick={openModal}
+              mt="md"
+            >
+              Start New Research
+            </Button>
+          </Stack>
+        )}
+
+        {/* Global error banner */}
+        {error && appState !== 'modal' && (
+          <Notification
+            color="red"
+            title="Error"
+            onClose={() => setError(null)}
+            mt="md"
+          >
+            {error}
+          </Notification>
+        )}
+      </AppShell.Main>
+
+      {/* ─── New Research Modal ─────────────────────────────── */}
+      <Modal
+        opened={modalOpen}
+        onClose={closeModal}
+        title={
+          <Group>
+            <IconFlask size={24} color="var(--mantine-color-indigo-6)" />
+            <Title order={4}>New Research</Title>
+          </Group>
+        }
+        size="lg"
+      >
+        <Stack gap="md">
+          <Textarea
+            label="Research Query"
+            placeholder="What do you want to research? Be specific for better results."
+            description="The engine will create a research plan and iterate through multiple search + scraping cycles."
+            minRows={3}
+            autosize
+            maxRows={6}
+            value={query}
+            onChange={(e) => setQuery(e.currentTarget.value)}
+            required
+          />
+
+          <Tooltip
+            label="Paste any OpenRouter model ID. The model handles planning, synthesis, and report generation."
+            multiline
+            maw={400}
+          >
+            <TextInput
+              label="Model (OpenRouter ID)"
+              placeholder="nvidia/nemotron-3-super-120b-a12b:free"
+              description="Supports any model available on OpenRouter"
+              value={model}
+              onChange={(e) => setModel(e.currentTarget.value)}
+            />
+          </Tooltip>
+
+          <Select
+            label="Quick Presets"
+            placeholder="Select a preset model..."
+            data={MODEL_PRESETS}
+            onChange={(val) => val && setModel(val)}
+            clearable
+          />
+
+          <div>
+            <Text size="sm" fw={500} mb={8}>
+              Depth: {depth}{' '}
+              <Text span c="dimmed" size="xs">
+                ({depth === 1
+                  ? 'Quick — 6 cycles'
+                  : depth === 3
+                  ? 'Standard — 18 cycles'
+                  : depth === 5
+                  ? 'Exhaustive — 30 cycles'
+                  : `${depth * 6} cycles`})
+              </Text>
+            </Text>
+            <Slider
+              min={1}
+              max={5}
+              step={1}
+              value={depth}
+              onChange={setDepth}
+              marks={[
+                { value: 1, label: 'Quick' },
+                { value: 3, label: 'Standard' },
+                { value: 5, label: 'Exhaustive' },
+              ]}
+              mb="lg"
+            />
+          </div>
+
+          {error && (
+            <Notification
+              color="red"
+              title="Error"
+              onClose={() => setError(null)}
+            >
+              {error}
+            </Notification>
+          )}
+
+          <Group grow>
+            <Button
+              size="md"
+              loading={isSubmitting}
+              onClick={handleGeneratePlan}
+              disabled={!query.trim()}
+              variant="gradient"
+              gradient={{ from: 'indigo', to: 'violet', deg: 135 }}
+              leftSection={<IconListCheck size={18} />}
+            >
+              Generate Plan
+            </Button>
+            <Button
+              size="md"
+              loading={isSubmitting}
+              onClick={handleQuickStart}
+              disabled={!query.trim()}
+              variant="light"
+              color="indigo"
+              leftSection={<IconFlask size={18} />}
+            >
+              Quick Start
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+    </AppShell>
+  );
+}
