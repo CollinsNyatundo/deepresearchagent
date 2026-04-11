@@ -37,19 +37,9 @@ class DuckDuckGoSearch:
 
     async def search(self, query: str, max_results: int = 10) -> list[SearchResult]:
         """Search DuckDuckGo with rate-limit hardening."""
-        try:
-            from ddgs.exceptions import (
-                DuckDuckGoSearchException,
-                RatelimitException,
-                TimeoutException,
-            )
-        except ImportError:
-            # Older package name — still supported during migration
-            from duckduckgo_search.exceptions import (  # type: ignore[no-redef]
-                DuckDuckGoSearchException,
-                RatelimitException,
-                TimeoutException,
-            )
+        # ddgs v9+ renamed DuckDuckGoSearchException -> DDGSException.
+        # duckduckgo_search package has been uninstalled — ddgs is the sole provider.
+        from ddgs.exceptions import DDGSException, RatelimitException, TimeoutException
 
         # Throttle: at least 1s between consecutive DDG searches
         now = asyncio.get_event_loop().time()
@@ -81,7 +71,7 @@ class DuckDuckGoSearch:
             logger.error(f"DDG search timed out: {e}")
             return []
 
-        except DuckDuckGoSearchException as e:
+        except DDGSException as e:
             logger.error(f"DDG search error: {e}")
             return []
 
@@ -90,16 +80,8 @@ class DuckDuckGoSearch:
             return []
 
     def _sync_search(self, query: str, max_results: int) -> list[SearchResult]:
-        """Synchronous DDG search — runs in thread pool.
-
-        Supports both the new `ddgs` package (renamed from `duckduckgo_search`).
-        Falls back to old name during transition.
-        """
-        try:
-            # New package name (>= v7.x renamed to ddgs)
-            from ddgs import DDGS
-        except ImportError:
-            from duckduckgo_search import DDGS  # type: ignore[no-redef]
+        """Synchronous DDG search — runs in thread pool via asyncio.to_thread()."""
+        from ddgs import DDGS  # ddgs v9 — duckduckgo_search package uninstalled
 
         ddgs_client = DDGS(timeout=20)
         raw = ddgs_client.text(query, max_results=max_results, backend="auto")

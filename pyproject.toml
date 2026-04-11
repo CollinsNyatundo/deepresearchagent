@@ -43,7 +43,7 @@ dependencies = [
                             # After install: python -m camoufox fetch
     # GitNexus bridge integration
     "aiohttp>=3.9",         # Async HTTP client for GitNexus eval-server API
-    "apscheduler>=3.10",    # Background scheduler for periodic graph refresh
+    # NOTE: apscheduler removed — scheduler uses pure asyncio (no extra deps)
 ]
 
 [project.optional-dependencies]
