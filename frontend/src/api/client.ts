@@ -327,46 +327,10 @@ export const api = {
     return handleResponse<{ status: string }>(res);
   },
 
-  // ──── GitNexus Code Architecture ─────────────────────────────────────
-
-  /** List all repositories currently indexed in the GitNexus eval-server. */
-  async listGitnexusRepos(): Promise<{ repos: string[]; eval_server_running: boolean }> {
-    const res = await fetch(`${BASE_URL}/gitnexus/repos`);
-    return handleResponse(res);
-  },
-
-  /** Get the cached GitNexus architecture graph for a specific repo. */
-  async getGitnexusGraph(repo: string): Promise<KnowledgeGraph> {
-    const res = await fetch(`${BASE_URL}/gitnexus/graph?repo=${encodeURIComponent(repo)}`);
-    return handleResponse<KnowledgeGraph>(res);
-  },
-
-  /** Trigger npx gitnexus analyze + graph rebuild for a repo (or all repos). */
-  async triggerGitnexusAnalyze(repo?: string): Promise<{ status: string; repo: string; message: string }> {
-    const url = repo
-      ? `${BASE_URL}/gitnexus/analyze?repo=${encodeURIComponent(repo)}`
-      : `${BASE_URL}/gitnexus/analyze`;
-    const res = await fetch(url, { method: 'POST' });
-    return handleResponse(res);
-  },
-
-  /** Get eval-server reachability, scheduler state, and per-repo cache info. */
-  async getGitnexusStatus(repo?: string): Promise<{
-    eval_server_running: boolean;
-    scheduler_running: boolean;
-    available_repos: string[];
-    repos?: Array<{ repo: string; graph_cached: boolean; graph_age_seconds: number | null; graph_path: string }>;
-    repo?: string;
-    graph_cached?: boolean;
-    graph_age_seconds?: number | null;
-    graph_path?: string;
-  }> {
-    const url = repo
-      ? `${BASE_URL}/gitnexus/status?repo=${encodeURIComponent(repo)}`
-      : `${BASE_URL}/gitnexus/status`;
-    const res = await fetch(url);
-    return handleResponse(res);
-  },
+  // ──── GitNexus Code Architecture (DEPRECATED) ───────────────────────
+  // Old endpoints (/gitnexus/repos, /gitnexus/graph, /gitnexus/analyze,
+  // /gitnexus/status) removed — they caused LadybugDB lock contention
+  // with `gitnexus serve`. Use the Web UI Bridge endpoints below instead.
 
   // ──── GitNexus Web UI Bridge (gitnexus serve) ─────────────────────
 

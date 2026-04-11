@@ -375,7 +375,7 @@ export default function App() {
       {/* ─── Main Content ───────────────────────────────────── */}
       <AppShell.Main>
         {/* Plan Review Mode */}
-        {appState === 'plan_review' && planPreview && (
+        {globalView !== 'code-arch' && appState === 'plan_review' && planPreview && (
           <PlanReview
             preview={planPreview}
             query={planQuery}
@@ -389,7 +389,7 @@ export default function App() {
         )}
 
         {/* Plan Loading */}
-        {appState === 'plan_loading' && (
+        {globalView !== 'code-arch' && appState === 'plan_loading' && (
           <Stack align="center" justify="center" style={{ height: '60vh' }}>
             <Loader size="xl" color="indigo" />
             <Title order={3} c="dimmed">
@@ -400,12 +400,12 @@ export default function App() {
         )}
 
         {/* SSE Streaming Mode */}
-        {appState === 'streaming' && (
+        {globalView !== 'code-arch' && appState === 'streaming' && (
           <ResearchProgress events={streamEvents} isActive={isStreaming} />
         )}
 
         {/* Results Mode (existing tabs) */}
-        {(appState === 'results' || appState === 'idle') && selectedRunId && (
+        {(appState === 'results' || appState === 'idle') && selectedRunId && globalView !== 'code-arch' && (
           <Stack gap="md">
             <Tabs value={activeTab} onChange={setActiveTab}>
               <Tabs.List>
@@ -464,7 +464,7 @@ export default function App() {
         )}
 
         {/* Idle — no run selected */}
-        {appState === 'idle' && !selectedRunId && (
+        {appState === 'idle' && !selectedRunId && globalView !== 'code-arch' && (
           <Stack align="center" justify="center" style={{ height: '60vh' }}>
             <IconFlask size={80} color="var(--mantine-color-gray-3)" stroke={1} />
             <Title order={2} c="dimmed">

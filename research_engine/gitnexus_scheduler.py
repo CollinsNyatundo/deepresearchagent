@@ -70,21 +70,39 @@ async def _run_gitnexus_analyze() -> None:
 
 
 async def _refresh_all_repos() -> None:
-    """Re-index then rebuild cached graphs for every indexed repo."""
-    await _run_gitnexus_analyze()
+    """Rebuild cached graphs for every indexed repo.
 
+    If the GitNexus eval-server is already running it holds an exclusive
+    LadybugDB lock on .gitnexus/lbug — running `npx gitnexus analyze`
+    concurrently would cause an IO lock exception.  In that case we skip
+    the analyze step and just rebuild the in-memory graph cache from the
+    already-indexed data.
+    """
     from research_engine.knowledge_graph.gitnexus_bridge import (
         build_and_save,
         is_eval_server_running,
         list_indexed_repos,
     )
 
-    if not await is_eval_server_running():
-        logger.warning(
-            "[gitnexus-scheduler] Eval-server not running — skipping graph refresh. "
-            "Start it with: npx gitnexus eval-server --port 4848"
+    eval_server_up = await is_eval_server_running()
+
+    if eval_server_up:
+        # Eval-server holds the DB lock — skip analyze to avoid conflict.
+        logger.info(
+            "[gitnexus-scheduler] Eval-server is running — skipping analyze "
+            "(LadybugDB lock held). Graph refresh will use the live index."
         )
-        return
+    else:
+        # Eval-server is not running — safe to re-index.
+        await _run_gitnexus_analyze()
+        # Re-check after analyze; if it failed, abort gracefully.
+        eval_server_up = await is_eval_server_running()
+        if not eval_server_up:
+            logger.warning(
+                "[gitnexus-scheduler] Eval-server unreachable after analyze — "
+                "skipping graph refresh. Start it with: npx gitnexus eval-server --port 4848"
+            )
+            return
 
     repos = await list_indexed_repos()
     if not repos:
@@ -102,44 +120,52 @@ async def _refresh_all_repos() -> None:
 
 # ─── Background loop ──────────────────────────────────────────────────────────
 
-async def _scheduler_loop(interval_seconds: int) -> None:
-    """Infinite loop: sleep → refresh → repeat.
+async def _scheduler_loop(interval_seconds: int, initial_delay_seconds: int) -> None:
+    """Infinite loop: optional initial delay → refresh → sleep → repeat.
 
-    The first run fires immediately (no initial delay) so the graph cache is
-    warm from the moment the server starts.
+    The initial delay prevents a race with the eval-server (and its LadybugDB
+    lock) at process startup.
     """
     logger.info(
-        "[gitnexus-scheduler] Background task started — interval: %ds (%d min).",
+        "[gitnexus-scheduler] Background task started — first run in %ds, "
+        "then every %ds (%d min).",
+        initial_delay_seconds,
         interval_seconds,
         interval_seconds // 60,
     )
+
+    if initial_delay_seconds > 0:
+        try:
+            await asyncio.sleep(initial_delay_seconds)
+        except asyncio.CancelledError:
+            return  # cancelled during initial delay — clean exit
+
     while True:
         try:
             await _refresh_all_repos()
         except asyncio.CancelledError:
-            raise  # propagate — this is how the task is stopped
+            raise
         except Exception as exc:
-            # Never crash the loop on unexpected errors
             logger.error("[gitnexus-scheduler] Unexpected error in refresh loop: %s", exc)
 
         try:
             await asyncio.sleep(interval_seconds)
         except asyncio.CancelledError:
-            break  # clean exit when stop_scheduler() cancels the task
+            break
 
     logger.info("[gitnexus-scheduler] Background task stopped.")
 
 
 # ─── Public API ───────────────────────────────────────────────────────────────
 
-def start_scheduler(interval_minutes: int = 30) -> None:
+def start_scheduler(interval_minutes: int = 30, initial_delay_minutes: int = 5) -> None:
     """Spawn the background refresh task.
 
-    Safe to call from a sync context (FastAPI lifespan) — internally calls
-    ``asyncio.get_event_loop().create_task()``.
-
     Args:
-        interval_minutes: Seconds between full refresh cycles. Default: 30 min.
+        interval_minutes: Minutes between full refresh cycles. Default: 30.
+        initial_delay_minutes: Minutes to wait before the *first* run.
+            Prevents a LadybugDB lock conflict with the eval-server that
+            starts at the same time. Default: 5 minutes.
     """
     global _task  # noqa: PLW0603
 
@@ -148,19 +174,20 @@ def start_scheduler(interval_minutes: int = 30) -> None:
         return
 
     interval_seconds = interval_minutes * 60
+    initial_delay_seconds = initial_delay_minutes * 60
 
     try:
         loop = asyncio.get_event_loop()
         _task = loop.create_task(
-            _scheduler_loop(interval_seconds),
+            _scheduler_loop(interval_seconds, initial_delay_seconds),
             name="gitnexus_refresh",
         )
         logger.info(
-            "[gitnexus-scheduler] Scheduler started — every %d minutes.",
+            "[gitnexus-scheduler] Scheduler started — first run in %d min, then every %d min.",
+            initial_delay_minutes,
             interval_minutes,
         )
     except RuntimeError as exc:
-        # No event loop running (e.g. called outside async context during tests)
         logger.warning("[gitnexus-scheduler] Could not start scheduler: %s", exc)
 
 

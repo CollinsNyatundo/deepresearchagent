@@ -47,7 +47,7 @@ interface ServeStatus {
 }
 
 const GITNEXUS_WEB_UI = 'https://gitnexus.vercel.app';
-const POLL_INTERVAL_MS = 5000;
+const POLL_INTERVAL_MS = 15_000; // 15s — serve status rarely changes
 
 export function GitNexusWebView() {
   const [status, setStatus] = useState<ServeStatus | null>(null);

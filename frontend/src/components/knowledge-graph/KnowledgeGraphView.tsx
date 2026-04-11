@@ -51,12 +51,6 @@ import { KGQueryPanel } from './KGQueryPanel';
 
 type KnowledgeGraphViewProps = {
   runId: string;
-  /**
-   * When set, the component renders the GitNexus code architecture graph
-   * for this specific repository name instead of a Graphify research KG.
-   * Pass the exact name as indexed in GitNexus (e.g. "DeepResearchAgent").
-   */
-  gitnexusRepo?: string;
 };
 
 // Node size scale by degree
@@ -93,7 +87,7 @@ function getEdgeColor(type: string): string {
   return typeColors[type] || '#6B7280';
 }
 
-export function KnowledgeGraphView({ runId, gitnexusRepo }: KnowledgeGraphViewProps) {
+export function KnowledgeGraphView({ runId }: KnowledgeGraphViewProps) {
   const graphRef = useRef<HTMLDivElement>(null);
   const g6Instance = useRef<any>(null);
 
@@ -114,10 +108,7 @@ export function KnowledgeGraphView({ runId, gitnexusRepo }: KnowledgeGraphViewPr
     setError(null);
     setNotBuilt(false);
     try {
-      // GitNexus mode: fetch architecture for the selected repo
-      const data = gitnexusRepo
-        ? await api.getGitnexusGraph(gitnexusRepo)
-        : await api.getKnowledgeGraph(runId);
+      const data = await api.getKnowledgeGraph(runId);
       setKg(data);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load knowledge graph';
@@ -129,7 +120,7 @@ export function KnowledgeGraphView({ runId, gitnexusRepo }: KnowledgeGraphViewPr
     } finally {
       setIsLoading(false);
     }
-  }, [runId, gitnexusRepo]);
+  }, [runId]);
 
   useEffect(() => {
     loadKg();
@@ -140,15 +131,9 @@ export function KnowledgeGraphView({ runId, gitnexusRepo }: KnowledgeGraphViewPr
     setIsBuilding(true);
     setError(null);
     try {
-      if (gitnexusRepo) {
-        await api.triggerGitnexusAnalyze(gitnexusRepo);
-        setTimeout(() => loadKg(), 5000);
-        setNotBuilt(false);
-      } else {
-        const built = await api.buildKnowledgeGraph(runId);
-        setKg(built);
-        setNotBuilt(false);
-      }
+      const built = await api.buildKnowledgeGraph(runId);
+      setKg(built);
+      setNotBuilt(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Build failed');
     } finally {
@@ -330,12 +315,12 @@ export function KnowledgeGraphView({ runId, gitnexusRepo }: KnowledgeGraphViewPr
         </ThemeIcon>
         <div style={{ textAlign: 'center' }}>
           <Title order={3} mb="xs">
-            {gitnexusRepo ? `Code Architecture Not Yet Built for "${gitnexusRepo}"` : 'Knowledge Graph Not Built'}
+            Knowledge Graph Not Built
           </Title>
           <Text c="dimmed" maw={500}>
-            {gitnexusRepo
-              ? `The GitNexus eval-server may not be running, or the graph for "${gitnexusRepo}" hasn't been generated yet. Click below to trigger a build.`
-              : 'The knowledge graph for this run hasn\'t been built yet. Building converts the research findings into a structured, navigable graph with automatic community detection and cross-domain relationship discovery.'}
+            The knowledge graph for this run hasn&apos;t been built yet. Building converts the
+            research findings into a structured, navigable graph with automatic community
+            detection and cross-domain relationship discovery.
           </Text>
         </div>
         <Button
@@ -346,16 +331,12 @@ export function KnowledgeGraphView({ runId, gitnexusRepo }: KnowledgeGraphViewPr
           onClick={handleBuild}
           loading={isBuilding}
         >
-          {isBuilding
-            ? (gitnexusRepo ? 'Triggering Analysis...' : 'Building Knowledge Graph...')
-            : (gitnexusRepo ? `Build Architecture for "${gitnexusRepo}"` : 'Build Knowledge Graph')}
+          {isBuilding ? 'Building Knowledge Graph...' : 'Build Knowledge Graph'}
         </Button>
         {isBuilding && (
           <Stack align="center" gap="xs">
             <Text size="sm" c="dimmed">
-              {gitnexusRepo
-                ? `Running npx gitnexus analyze → querying eval-server for "${gitnexusRepo}" → saving graph...`
-                : 'Exporting corpus → Running Graphify → Parsing graph...'}
+              Exporting corpus → Running Graphify → Parsing graph...
             </Text>
             <Progress size="sm" value={100} animated color="indigo" w={300} />
           </Stack>

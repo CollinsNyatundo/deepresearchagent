@@ -22,10 +22,10 @@ Knowledge Graph (Graphify) Endpoints:
 - POST /runs/{id}/knowledge-graph/mcp/start — Start MCP server
 - POST /runs/{id}/knowledge-graph/mcp/stop  — Stop MCP server
 
-GitNexus Code Architecture Endpoints:
-- GET  /gitnexus/graph    — Serve cached codebase architecture KnowledgeGraph
-- POST /gitnexus/analyze  — Trigger npx gitnexus analyze + graph rebuild
-- GET  /gitnexus/status   — Check eval-server reachability & scheduler state
+GitNexus Web UI Bridge Endpoints:
+- POST /gitnexus/serve/start   — Start npx gitnexus serve (port 4747)
+- POST /gitnexus/serve/stop    — Stop the running gitnexus serve process
+- GET  /gitnexus/serve/status  — Check if gitnexus serve is running
 """
 
 from __future__ import annotations
@@ -79,11 +79,12 @@ config = get_config()
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):  # noqa: ARG001
-    """Start background services on startup, tear down on shutdown."""
-    from research_engine.gitnexus_scheduler import start_scheduler, stop_scheduler
-    start_scheduler(interval_minutes=30)
+    """Application lifespan — startup / shutdown hooks."""
+    # NOTE: gitnexus_scheduler was removed to eliminate LadybugDB lock
+    # contention between `gitnexus serve` (Web UI) and background
+    # `npx gitnexus analyze` tasks.  The official GitNexus Web UI now
+    # handles all codebase topology via the /gitnexus/serve/* endpoints.
     yield
-    stop_scheduler()
 
 
 app = FastAPI(
@@ -708,146 +709,14 @@ async def knowledge_graph_status(run_id: str):
     }
 
 
-# ─── GitNexus Code Architecture ──────────────────────────────────────────────
-
-@app.get("/gitnexus/repos")
-async def list_gitnexus_repos():
-    """Return repository names currently indexed in the GitNexus eval-server.
-
-    The frontend calls this to populate the repo-selector dropdown in the
-    Code Architecture panel. Each name can then be passed as the ``repo``
-    query param to the other /gitnexus/* endpoints.
-    """
-    from research_engine.knowledge_graph.gitnexus_bridge import (
-        is_eval_server_running,
-        list_indexed_repos,
-    )
-
-    if not await is_eval_server_running():
-        return {"repos": [], "eval_server_running": False}
-
-    repos = await list_indexed_repos()
-    return {"repos": repos, "eval_server_running": True}
-
-
-@app.get("/gitnexus/graph", response_model=KnowledgeGraph)
-async def get_gitnexus_graph(repo: str):
-    """Serve the cached GitNexus codebase architecture for *repo*.
-
-    The graph is rebuilt periodically by the background scheduler
-    (every 30 min by default). If no cached graph exists yet, this
-    endpoint triggers a synchronous build on the first request.
-
-    Query params:
-        repo: Repository name as indexed in GitNexus
-              (e.g. "DeepResearchAgent", "ComplianceGaurd").
-              Use GET /gitnexus/repos to discover available names.
-    """
-    from research_engine.knowledge_graph.gitnexus_bridge import (
-        build_and_save,
-        is_eval_server_running,
-        load_cached_graph,
-    )
-
-    if not repo:
-        raise HTTPException(status_code=422, detail="'repo' query parameter is required.")
-
-    kg = load_cached_graph(repo)
-    if kg is not None:
-        return kg
-
-    # Nothing cached yet — build now if the eval-server is up
-    if not await is_eval_server_running():
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                f"GitNexus graph for '{repo}' not yet built and eval-server is not running. "
-                "Start it with: npx gitnexus eval-server --port 4848"
-            ),
-        )
-
-    try:
-        await build_and_save(repo)
-        kg = load_cached_graph(repo)
-        if kg is None:
-            raise RuntimeError("Graph build succeeded but file is unreadable.")
-        return kg
-    except Exception as e:
-        logger.error("GitNexus graph build failed for '%s': %s", repo, e)
-        raise HTTPException(status_code=500, detail=f"Graph build failed: {e}")
-
-
-@app.post("/gitnexus/analyze")
-async def trigger_gitnexus_analyze(repo: str | None = None):
-    """Trigger npx gitnexus analyze + graph rebuild asynchronously.
-
-    Query params:
-        repo: Optional. Rebuild only this repo's graph after analysis.
-              If omitted, all indexed repos are refreshed.
-
-    Returns immediately — the heavy work runs in the background.
-    """
-    from research_engine.gitnexus_scheduler import _refresh_all_repos, refresh_repo  # noqa: PLC2701
-
-    if repo:
-        asyncio.create_task(refresh_repo(repo))
-        return {
-            "status": "analyze_triggered",
-            "repo": repo,
-            "message": f"Rebuilding graph for '{repo}' in background.",
-        }
-    else:
-        asyncio.create_task(_refresh_all_repos())
-        return {
-            "status": "analyze_triggered",
-            "repo": "all",
-            "message": "Re-indexing and refreshing all repos in background.",
-        }
-
-
-@app.get("/gitnexus/status")
-async def get_gitnexus_status(repo: str | None = None):
-    """Report the eval-server reachability, scheduler state, and cached graph age.
-
-    Query params:
-        repo: Optional. If provided, also returns per-repo cache info.
-    """
-    from research_engine.gitnexus_scheduler import is_scheduler_running
-    from research_engine.knowledge_graph.gitnexus_bridge import (
-        cache_age_seconds,
-        graph_output_path,
-        is_eval_server_running,
-        list_indexed_repos,
-    )
-
-    eval_up = await is_eval_server_running()
-    available_repos = await list_indexed_repos() if eval_up else []
-
-    result: dict = {
-        "eval_server_running": eval_up,
-        "scheduler_running": is_scheduler_running(),
-        "available_repos": available_repos,
-    }
-
-    if repo:
-        age = cache_age_seconds(repo)
-        result["repo"] = repo
-        result["graph_cached"] = age is not None
-        result["graph_age_seconds"] = round(age, 1) if age is not None else None
-        result["graph_path"] = str(graph_output_path(repo))
-    else:
-        repo_states = []
-        for r in available_repos:
-            age = cache_age_seconds(r)
-            repo_states.append({
-                "repo": r,
-                "graph_cached": age is not None,
-                "graph_age_seconds": round(age, 1) if age is not None else None,
-                "graph_path": str(graph_output_path(r)),
-            })
-        result["repos"] = repo_states
-
-    return result
+# ─── GitNexus Code Architecture (DEPRECATED) ────────────────────────────────
+# The old /gitnexus/repos, /gitnexus/graph, /gitnexus/analyze, and
+# /gitnexus/status endpoints have been removed.  They relied on the
+# gitnexus eval-server (port 4848) and a background scheduler that ran
+# `npx gitnexus analyze` every 30 minutes — both of which competed with
+# `gitnexus serve` (port 4747) for the exclusive LadybugDB write lock,
+# causing IO exceptions.  The official GitNexus Web UI now handles all
+# codebase topology directly via the /gitnexus/serve/* endpoints below.
 
 
 # ─── GitNexus Web UI Bridge (gitnexus serve) ──────────────────────────────────
@@ -918,17 +787,18 @@ async def stop_gitnexus_serve():
     """Stop the running `npx gitnexus serve` process."""
     global _gitnexus_serve_proc  # noqa: PLW0603
 
-    if _gitnexus_serve_proc is None or _gitnexus_serve_proc.returncode is not None:
+    proc = _gitnexus_serve_proc
+    if proc is None or proc.returncode is not None:
         _gitnexus_serve_proc = None
         return {"status": "not_running", "message": "gitnexus serve is not running."}
 
     try:
-        _gitnexus_serve_proc.terminate()
+        proc.terminate()
         try:
-            await asyncio.wait_for(_gitnexus_serve_proc.wait(), timeout=5.0)
+            await asyncio.wait_for(proc.wait(), timeout=5.0)
         except asyncio.TimeoutError:
-            _gitnexus_serve_proc.kill()
-        pid = _gitnexus_serve_proc.pid
+            proc.kill()
+        pid = proc.pid
         _gitnexus_serve_proc = None
         logger.info("GitNexus serve stopped (PID %d)", pid)
         return {"status": "stopped", "pid": pid}

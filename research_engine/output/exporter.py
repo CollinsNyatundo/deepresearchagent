@@ -129,7 +129,7 @@ def _export_pdf(result: ResearchResult, path: Path) -> None:
             def header(self):
                 self.set_font("Helvetica", "B", 10)
                 self.set_text_color(100, 100, 100)
-                self.cell(0, 8, "Deep Research Agent — Research Report", align="R")
+                self.cell(0, 8, "Deep Research Agent - Research Report", align="R")
                 self.ln(12)
 
             def footer(self):
