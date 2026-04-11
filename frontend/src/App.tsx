@@ -29,6 +29,7 @@ import {
   IconDownload,
   IconListCheck,
   IconNetwork,
+  IconCode,
 } from '@tabler/icons-react';
 
 import { RunList } from './components/runs/RunList';
@@ -84,6 +85,9 @@ export default function App() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string | null>('report');
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // Global view: 'research' | 'code-arch'
+  const [globalView, setGlobalView] = useState<'research' | 'code-arch'>('research');
 
   // App state machine
   const [appState, setAppState] = useState<AppState>('idle');
@@ -309,31 +313,56 @@ export default function App() {
         </Group>
       </AppShell.Header>
 
-      {/* ─── Sidebar ────────────────────────────────────────── */}
+      {/* ─── Sidebar ─────────────────────────────────────────── */}
       <AppShell.Navbar p="md">
         <Stack gap="sm" style={{ height: '100%' }}>
-          <Button
+          {/* Mode switcher */}
+          <SegmentedControl
             fullWidth
-            leftSection={<IconPlus size={18} />}
-            onClick={() => {
-              resetToIdle();
-              openModal();
-            }}
-            variant="gradient"
-            gradient={{ from: 'indigo', to: 'violet', deg: 135 }}
-          >
-            New Research
-          </Button>
-          <RunList
-            key={refreshKey}
-            selectedRunId={selectedRunId}
-            onSelectRun={(id) => {
-              resetToIdle();
-              setSelectedRunId(id);
-              setActiveTab('report');
-              setAppState('results');
-            }}
+            size="xs"
+            value={globalView}
+            onChange={(val) => setGlobalView(val as 'research' | 'code-arch')}
+            data={[
+              { label: 'Research', value: 'research' },
+              { label: 'Code Arch', value: 'code-arch' },
+            ]}
           />
+          {globalView === 'research' && (
+            <>
+              <Button
+                fullWidth
+                leftSection={<IconPlus size={18} />}
+                onClick={() => {
+                  resetToIdle();
+                  openModal();
+                }}
+                variant="gradient"
+                gradient={{ from: 'indigo', to: 'violet', deg: 135 }}
+              >
+                New Research
+              </Button>
+              <RunList
+                key={refreshKey}
+                selectedRunId={selectedRunId}
+                onSelectRun={(id) => {
+                  resetToIdle();
+                  setSelectedRunId(id);
+                  setActiveTab('report');
+                  setAppState('results');
+                }}
+              />
+            </>
+          )}
+          {globalView === 'code-arch' && (
+            <Stack gap="xs">
+              <Text size="sm" c="dimmed" ta="center" pt="sm">
+                GitNexus codebase intelligence — refreshes every 30 min automatically.
+              </Text>
+              <Text size="xs" c="dimmed" ta="center">
+                Or trigger manually via API POST /gitnexus/analyze
+              </Text>
+            </Stack>
+          )}
         </Stack>
       </AppShell.Navbar>
 
@@ -462,6 +491,22 @@ export default function App() {
           >
             {error}
           </Notification>
+        )}
+
+        {/* ─── Code Architecture View (GitNexus) ─────────────── */}
+        {globalView === 'code-arch' && (
+          <Stack gap="md">
+            <Group>
+              <IconCode size={24} color="var(--mantine-color-violet-6)" />
+              <Title order={3}>Code Architecture</Title>
+              <Badge variant="light" color="violet">GitNexus</Badge>
+            </Group>
+            <Text c="dimmed" size="sm">
+              Interactive codebase topology — nodes are Files, Classes, and Functions;
+              edges are CALLS, IMPORTS, EXTENDS relationships extracted from the live code graph.
+            </Text>
+            <KnowledgeGraphView runId="gitnexus" />
+          </Stack>
         )}
       </AppShell.Main>
 

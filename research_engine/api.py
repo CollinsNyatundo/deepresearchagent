@@ -21,6 +21,11 @@ Knowledge Graph (Graphify) Endpoints:
 - GET  /runs/{id}/knowledge-graph/mcp      — MCP server status
 - POST /runs/{id}/knowledge-graph/mcp/start — Start MCP server
 - POST /runs/{id}/knowledge-graph/mcp/stop  — Stop MCP server
+
+GitNexus Code Architecture Endpoints:
+- GET  /gitnexus/graph    — Serve cached codebase architecture KnowledgeGraph
+- POST /gitnexus/analyze  — Trigger npx gitnexus analyze + graph rebuild
+- GET  /gitnexus/status   — Check eval-server reachability & scheduler state
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -71,10 +77,20 @@ config = get_config()
 
 # ─── FastAPI App ─────────────────────────────────────────────────────
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):  # noqa: ARG001
+    """Start background services on startup, tear down on shutdown."""
+    from research_engine.gitnexus_scheduler import start_scheduler, stop_scheduler
+    start_scheduler(interval_minutes=30)
+    yield
+    stop_scheduler()
+
+
 app = FastAPI(
     title="Deep Research Agent",
     description="Exhaustive, citation-backed deep research with mindmap visualization",
     version="0.2.0",
+    lifespan=_lifespan,
 )
 
 # CORS for frontend (default: http://localhost:5173)
@@ -662,4 +678,83 @@ async def knowledge_graph_status(run_id: str):
         "run_id": run_id,
         "knowledge_graph_available": knowledge_graph_available(run_id),
         "graph_html_available": graph_html_available(run_id),
+    }
+
+
+# ─── GitNexus Code Architecture ──────────────────────────────────────────────
+
+@app.get("/gitnexus/graph", response_model=KnowledgeGraph)
+async def get_gitnexus_graph():
+    """Serve the cached GitNexus codebase architecture as a KnowledgeGraph.
+
+    The graph is rebuilt periodically by the background scheduler
+    (every 30 min by default). If no cached graph exists yet, this
+    endpoint triggers a synchronous build first.
+    """
+    from research_engine.knowledge_graph.gitnexus_bridge import (
+        build_and_save,
+        is_eval_server_running,
+        load_cached_graph,
+    )
+
+    kg = load_cached_graph()
+    if kg is not None:
+        return kg
+
+    # Nothing cached yet — build now if the eval-server is up
+    if not await is_eval_server_running():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "GitNexus graph not yet built and eval-server is not running. "
+                "Start it with: npx gitnexus eval-server --port 4848"
+            ),
+        )
+
+    try:
+        await build_and_save()
+        kg = load_cached_graph()
+        if kg is None:
+            raise RuntimeError("Graph build succeeded but file is unreadable.")
+        return kg
+    except Exception as e:
+        logger.error("GitNexus graph build failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Graph build failed: {e}")
+
+
+@app.post("/gitnexus/analyze")
+async def trigger_gitnexus_analyze():
+    """Trigger npx gitnexus analyze + graph rebuild asynchronously.
+
+    Returns immediately — the analysis runs in the background.
+    """
+    from research_engine.gitnexus_scheduler import _refresh_graph  # noqa: PLC2701
+
+    asyncio.create_task(_refresh_graph())
+    return {"status": "analyze_triggered", "message": "Running in background — poll /gitnexus/status for completion."}
+
+
+@app.get("/gitnexus/status")
+async def get_gitnexus_status():
+    """Report the eval-server reachability, scheduler state, and cached graph age."""
+    from research_engine.gitnexus_scheduler import is_scheduler_running
+    from research_engine.knowledge_graph.gitnexus_bridge import (
+        GRAPH_OUTPUT_PATH,
+        is_eval_server_running,
+    )
+
+    eval_up = await is_eval_server_running()
+    graph_exists = GRAPH_OUTPUT_PATH.exists()
+    graph_age_seconds: float | None = None
+
+    if graph_exists:
+        import time
+        graph_age_seconds = round(time.time() - GRAPH_OUTPUT_PATH.stat().st_mtime, 1)
+
+    return {
+        "eval_server_running": eval_up,
+        "scheduler_running": is_scheduler_running(),
+        "graph_cached": graph_exists,
+        "graph_age_seconds": graph_age_seconds,
+        "graph_path": str(GRAPH_OUTPUT_PATH),
     }

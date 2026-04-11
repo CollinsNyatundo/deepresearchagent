@@ -326,5 +326,31 @@ export const api = {
     });
     return handleResponse<{ status: string }>(res);
   },
+
+  // ──── GitNexus Code Architecture ─────────────────────────────────────
+
+  /** Get the GitNexus codebase architecture graph (cached or freshly built). */
+  async getGitnexusGraph(): Promise<KnowledgeGraph> {
+    const res = await fetch(`${BASE_URL}/gitnexus/graph`);
+    return handleResponse<KnowledgeGraph>(res);
+  },
+
+  /** Trigger npx gitnexus analyze + graph rebuild in the background. */
+  async triggerGitnexusAnalyze(): Promise<{ status: string; message: string }> {
+    const res = await fetch(`${BASE_URL}/gitnexus/analyze`, { method: 'POST' });
+    return handleResponse<{ status: string; message: string }>(res);
+  },
+
+  /** Get GitNexus eval-server reachability, scheduler state, and graph age. */
+  async getGitnexusStatus(): Promise<{
+    eval_server_running: boolean;
+    scheduler_running: boolean;
+    graph_cached: boolean;
+    graph_age_seconds: number | null;
+    graph_path: string;
+  }> {
+    const res = await fetch(`${BASE_URL}/gitnexus/status`);
+    return handleResponse(res);
+  },
 };
 

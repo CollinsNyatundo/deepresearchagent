@@ -168,5 +168,126 @@ def list_runs(
         )
 
 
+@app.command()
+def gitnexus_bridge(
+    force: bool = typer.Option(
+        False, "--force", "-f",
+        help="Force rebuild even if a cached graph exists",
+    ),
+    eval_server_port: int = typer.Option(
+        4848, "--port", "-p",
+        help="GitNexus eval-server port",
+    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging"),
+) -> None:
+    """Rebuild the GitNexus codebase architecture graph.
+
+    Runs npx gitnexus analyze then queries the eval-server to build
+    outputs/gitnexus_graph.json which the frontend serves as the
+    Code Architecture view.
+
+    The eval-server must be running:
+        npx gitnexus eval-server --port 4848
+    """
+    _setup_logging(verbose)
+    asyncio.run(_run_gitnexus_bridge(force, eval_server_port))
+
+
+async def _run_gitnexus_bridge(force: bool, port: int) -> None:
+    from research_engine.knowledge_graph.gitnexus_bridge import (
+        GRAPH_OUTPUT_PATH,
+        build_and_save,
+        is_eval_server_running,
+    )
+
+    if GRAPH_OUTPUT_PATH.exists() and not force:
+        console.print(
+            f"[yellow]Cache exists at {GRAPH_OUTPUT_PATH}.[/yellow] "
+            "Use --force to rebuild."
+        )
+        return
+
+    if not await is_eval_server_running():
+        console.print(
+            "[red]GitNexus eval-server not running.[/red]\n"
+            f"Start it first:\n  [bold]npx gitnexus eval-server --port {port}[/bold]"
+        )
+        raise typer.Exit(code=1)
+
+    console.print("[blue]Running npx gitnexus analyze…[/blue]")
+    proc = await asyncio.create_subprocess_exec(
+        "npx", "gitnexus", "analyze",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await asyncio.wait_for(proc.communicate(), timeout=600)
+    if proc.returncode != 0:
+        console.print(f"[red]analyze failed:[/red] {stderr.decode(errors='replace')[:300]}")
+        raise typer.Exit(code=1)
+
+    console.print("[blue]Building gitnexus_graph.json…[/blue]")
+    path = await build_and_save()
+    console.print(f"[bold green]✅  Graph saved to {path}[/bold green]")
+
+
+@app.command()
+def gitnexus_wiki(
+    gist: bool = typer.Option(
+        False, "--gist",
+        help="Publish to a public GitHub Gist (requires gh CLI authenticated)",
+    ),
+    output: str | None = typer.Option(
+        None, "--output", "-o",
+        help="Save wiki to this local directory instead of .gitnexus/wiki/",
+    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose logging"),
+) -> None:
+    """Generate an architecture wiki from the GitNexus knowledge graph.
+
+    Reads the .gitnexus graph and writes comprehensive, human-readable
+    architecture documentation covering clusters, processes, and key files.
+
+    Pass --gist to also publish to a public GitHub Gist so you can read it
+    beautifully in the browser.
+    """
+    _setup_logging(verbose)
+    asyncio.run(_run_gitnexus_wiki(gist, output))
+
+
+async def _run_gitnexus_wiki(gist: bool, output: str | None) -> None:
+    args = ["npx", "gitnexus", "wiki"]
+    if output:
+        args += [output]
+    if gist:
+        args += ["--gist"]
+
+    console.print("[blue]Generating GitNexus architecture wiki…[/blue]")
+    console.print(f"  Command: [dim]{' '.join(args)}[/dim]")
+
+    proc = await asyncio.create_subprocess_exec(
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+
+    if proc.returncode != 0:
+        console.print(f"[red]wiki generation failed:[/red] {stderr.decode(errors='replace')[:500]}")
+        raise typer.Exit(code=1)
+
+    output_text = stdout.decode(errors="replace")
+    console.print(output_text)
+
+    if gist and "https://" in output_text:
+        import re
+        urls = re.findall(r"https://[^\s]+", output_text)
+        if urls:
+            console.print(f"\n[bold green]📚 Wiki published! Open in browser:[/bold green]")
+            for url in urls:
+                console.print(f"  [link={url}]{url}[/link]")
+    else:
+        console.print("[bold green]📚 Wiki generated in .gitnexus/wiki/[/bold green]")
+
+
 if __name__ == "__main__":
     app()

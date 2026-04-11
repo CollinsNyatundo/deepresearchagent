@@ -108,11 +108,14 @@ export function KnowledgeGraphView({ runId }: KnowledgeGraphViewProps) {
     setError(null);
     setNotBuilt(false);
     try {
-      const data = await api.getKnowledgeGraph(runId);
+      // Special case: 'gitnexus' runId fetches the codebase architecture graph
+      const data = runId === 'gitnexus'
+        ? await api.getGitnexusGraph()
+        : await api.getKnowledgeGraph(runId);
       setKg(data);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to load knowledge graph';
-      if (msg.includes('404') || msg.includes('not built')) {
+      if (msg.includes('404') || msg.includes('not built') || msg.includes('503')) {
         setNotBuilt(true);
       } else {
         setError(msg);
@@ -131,9 +134,16 @@ export function KnowledgeGraphView({ runId }: KnowledgeGraphViewProps) {
     setIsBuilding(true);
     setError(null);
     try {
-      const built = await api.buildKnowledgeGraph(runId);
-      setKg(built);
-      setNotBuilt(false);
+      if (runId === 'gitnexus') {
+        // Trigger async analyze + rebuild, then poll
+        await api.triggerGitnexusAnalyze();
+        setTimeout(() => loadKg(), 5000); // Give it 5s head start then try to load
+        setNotBuilt(false);
+      } else {
+        const built = await api.buildKnowledgeGraph(runId);
+        setKg(built);
+        setNotBuilt(false);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Build failed');
     } finally {
@@ -314,11 +324,13 @@ export function KnowledgeGraphView({ runId }: KnowledgeGraphViewProps) {
           <IconNetwork size={48} />
         </ThemeIcon>
         <div style={{ textAlign: 'center' }}>
-          <Title order={3} mb="xs">Knowledge Graph Not Built</Title>
+          <Title order={3} mb="xs">
+            {runId === 'gitnexus' ? 'Code Architecture Not Yet Built' : 'Knowledge Graph Not Built'}
+          </Title>
           <Text c="dimmed" maw={500}>
-            The knowledge graph for this run hasn't been built yet.
-            Building converts the research findings into a structured, navigable graph
-            with automatic community detection and cross-domain relationship discovery.
+            {runId === 'gitnexus'
+              ? 'The GitNexus eval-server may not be running, or the graph hasn\'t been generated yet. Click below to trigger a build.'
+              : 'The knowledge graph for this run hasn\'t been built yet. Building converts the research findings into a structured, navigable graph with automatic community detection and cross-domain relationship discovery.'}
           </Text>
         </div>
         <Button
@@ -329,12 +341,16 @@ export function KnowledgeGraphView({ runId }: KnowledgeGraphViewProps) {
           onClick={handleBuild}
           loading={isBuilding}
         >
-          {isBuilding ? 'Building Knowledge Graph...' : 'Build Knowledge Graph'}
+          {isBuilding
+            ? (runId === 'gitnexus' ? 'Triggering Analysis...' : 'Building Knowledge Graph...')
+            : (runId === 'gitnexus' ? 'Build Code Architecture' : 'Build Knowledge Graph')}
         </Button>
         {isBuilding && (
           <Stack align="center" gap="xs">
             <Text size="sm" c="dimmed">
-              Exporting corpus → Running Graphify → Parsing graph...
+              {runId === 'gitnexus'
+                ? 'Running npx gitnexus analyze → querying eval-server → saving graph...'
+                : 'Exporting corpus → Running Graphify → Parsing graph...'}
             </Text>
             <Progress size="sm" value={100} animated color="indigo" w={300} />
           </Stack>

@@ -41,6 +41,9 @@ dependencies = [
     "patchright>=1.49",     # Required: StealthyFetcher stealth Chromium
     "camoufox>=0.4",        # Required: Camoufox Firefox (maximum fingerprint spoofing)
                             # After install: python -m camoufox fetch
+    # GitNexus bridge integration
+    "aiohttp>=3.9",         # Async HTTP client for GitNexus eval-server API
+    "apscheduler>=3.10",    # Background scheduler for periodic graph refresh
 ]
 
 [project.optional-dependencies]
