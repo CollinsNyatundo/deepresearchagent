@@ -113,6 +113,23 @@ app.add_middleware(
 _gitnexus_serve_proc: asyncio.subprocess.Process | None = None
 
 
+# ─── Scraper Cache Control ────────────────────────────────────────────
+# The fetcher availability cache is set at module import time.
+# If curl_cffi / playwright was installed AFTER the server started,
+# call this endpoint to re-probe without a full restart.
+
+@app.post("/scraper/refresh-cache")
+async def refresh_scraper_cache():
+    """Re-probe Scrapling fetcher availability and return the fresh result.
+
+    Use after installing curl_cffi or playwright packages while the server
+    is already running — avoids a full process restart.
+    """
+    from research_engine.sources.web_scraper import reset_fetcher_cache
+    result = reset_fetcher_cache()
+    return {"scrapling_fetchers": result}
+
+
 # ─── Run Listing & Retrieval ─────────────────────────────────────────
 
 @app.get("/runs", response_model=list[RunSummary])

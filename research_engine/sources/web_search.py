@@ -37,11 +37,19 @@ class DuckDuckGoSearch:
 
     async def search(self, query: str, max_results: int = 10) -> list[SearchResult]:
         """Search DuckDuckGo with rate-limit hardening."""
-        from duckduckgo_search.exceptions import (
-            DuckDuckGoSearchException,
-            RatelimitException,
-            TimeoutException,
-        )
+        try:
+            from ddgs.exceptions import (
+                DuckDuckGoSearchException,
+                RatelimitException,
+                TimeoutException,
+            )
+        except ImportError:
+            # Older package name — still supported during migration
+            from duckduckgo_search.exceptions import (  # type: ignore[no-redef]
+                DuckDuckGoSearchException,
+                RatelimitException,
+                TimeoutException,
+            )
 
         # Throttle: at least 1s between consecutive DDG searches
         now = asyncio.get_event_loop().time()

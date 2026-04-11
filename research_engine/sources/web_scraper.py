@@ -89,10 +89,24 @@ _FETCHER_AVAILABILITY: dict[str, bool] | None = None
 
 
 def get_fetcher_availability() -> dict[str, bool]:
+    """Return cached fetcher availability, probing once per process lifetime."""
     global _FETCHER_AVAILABILITY
     if _FETCHER_AVAILABILITY is None:
         _FETCHER_AVAILABILITY = _check_fetcher_availability()
     return _FETCHER_AVAILABILITY
+
+
+def reset_fetcher_cache() -> dict[str, bool]:
+    """Force re-probe of fetcher availability and return fresh result.
+
+    Call this after installing new packages (e.g. curl_cffi, playwright)
+    without restarting the server.
+    """
+    global _FETCHER_AVAILABILITY
+    _FETCHER_AVAILABILITY = None
+    result = get_fetcher_availability()
+    logger.info(f"Fetcher cache refreshed: {result}")
+    return result
 
 
 class WebScraper:
