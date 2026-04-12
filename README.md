@@ -1,6 +1,6 @@
 # 🔬 Deep Research Agent
 
-> Perplexity-grade, autonomous deep research engine with interactive mindmap visualization, knowledge graph extraction, and multi-provider LLM + search support.
+> Perplexity-grade, autonomous deep research engine with interactive mindmap visualization, knowledge graph extraction, multi-provider LLM + search support, and code intelligence.
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green?logo=fastapi)](https://fastapi.tiangolo.com)
@@ -12,7 +12,7 @@
 
 ## Overview
 
-Deep Research Agent implements the **DRE (Deep Research Reflect Evolve)** algorithm — a multi-cycle, self-improving research loop that:
+Deep Research Agent implements the **DRE (Deep Research Reflect Evolve)** algorithm — a multi-cycle, self-improving research loop that acts as your personal AI research assistant and engineering platform. It autonomously:
 
 1. **Plans** — decomposes your query into targeted sub-questions
 2. **Searches** — runs parallel queries across DuckDuckGo, Tavily, and Brave
@@ -22,7 +22,7 @@ Deep Research Agent implements the **DRE (Deep Research Reflect Evolve)** algori
 6. **Evolves** — re-searches gaps via reflective retry until ≥90% confidence or 30 cycles
 7. **Exports** — produces a structured Markdown report + interactive mindmap + knowledge graph
 
-The engine is **fully async**, **streaming over SSE**, and exposes a REST API consumed by a **React/Mantine frontend**.
+The engine is **fully async**, **streaming over SSE**, exposes a robust REST API consumed by a **React/Mantine frontend**, and is extensible via **MCP (Model Context Protocol)** servers.
 
 ---
 
@@ -31,7 +31,7 @@ The engine is **fully async**, **streaming over SSE**, and exposes a REST API co
 ### Prerequisites
 
 - Python ≥ 3.11
-- Node.js ≥ 18 (for the frontend)
+- Node.js ≥ 18 (for the frontend, and running GitNexus)
 - An [OpenRouter](https://openrouter.ai) API key (free tier works)
 
 ### Installation
@@ -44,7 +44,7 @@ cd deepresearchagent
 # 2. Create virtual environment
 python -m venv .venv
 .venv\Scripts\Activate.ps1        # Windows PowerShell
-# source .venv/bin/activate        # macOS / Linux
+# source .venv/bin/activate       # macOS / Linux
 
 # 3. Install Python dependencies
 pip install -e .
@@ -102,6 +102,214 @@ python -X utf8 graphify-out/test_queries.py    # Run all query tests
 
 ---
 
+## Architecture
+
+### System Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                       Frontend (React)                          │
+│     Mantine UI  •  AntV G6  •  SSE streaming                    │
+│     Tabs: Runs | Report | Mindmap | Graphify | Code Arch      │
+└──────────────────────┬────────────────────────────────┬─────────┘
+                       │ HTTP / SSE                     │ HTTP
+                       ▼                                ▼
+┌───────────────────────────────────────────────┐ ┌────────────────┐
+│          FastAPI REST Server (:8000)          │ │  GitNexus      │
+│  /research  •  /runs  •  /knowledge-graph     │ │  Server        │
+│  /gitnexus/serve (Start/Stop lifecycle API)   │ │  (:4747)       │
+└──────────────────────┬────────────────────────┘ └────────────────┘
+                       │
+          ┌────────────┼──────────────────┐
+          ▼            ▼                  ▼
+┌─────────────┐ ┌────────────┐  ┌────────────────────┐
+│  Orchestrator│ │  LLM Layer │  │  Knowledge Graph   │
+│  DRE Loop   │ │  OpenRouter│  │  (Graphify)         │
+│  (30 cycles)│ │  / Groq    │  │  Builder+MCP Bridge│
+└──────┬──────┘ └────────────┘  └────────────────────┘
+       │
+  ┌────┴─────────────────────────────┐
+  ▼                                  ▼
+┌────────┐ ┌───────────────────────────────────────────────┐
+│Planner │ │ Search + Scrape + Rerank + MCP Analysis       │
+│Crossover│ │ DDG • Tavily • Brave • GitHub MCP Server      │
+│Retry   │ │ Scrapling (stealth→JS→HTTP)                   │
+└────────┘ └───────────────────────────────────────────────┘
+```
+
+### Backend Modules (`research_engine/`)
+
+| Module | Description |
+|--------|-------------|
+| `agent/orchestrator.py` | Core DRE loop — coordinates all phases. 764 lines |
+| `agent/planner.py` | LLM-based query decomposition and plan generation |
+| `agent/searcher.py` | Search execution, content validation, query generation |
+| `agent/crossover.py` | Evolutionary candidate merging via multiple LLM calls |
+| `agent/retry.py` | Protocol-H reflective retry for low-confidence cycles |
+| `agent/context.py` | In-memory Q&A history and research state manager |
+| `llm/provider.py` | Async OpenRouter/Groq provider with structured output + fallback |
+| `llm/prompts.py` | All LLM prompt templates |
+| `sources/web_search.py` | DuckDuckGo + Tavily + Brave search providers + aggregator |
+| `sources/web_scraper.py` | Scrapling tiered fetcher (stealthy → dynamic → basic) |
+| `sources/github_search.py` | GitHub MCP client for code-aware research mode |
+| `sources/reranker.py` | LLM-based search result reranking |
+| `knowledge_graph/builder.py` | Graphify integration — corpus export → subprocess → parse |
+| `knowledge_graph/enricher.py` | ArXiv/PDF corpus enricher for strategy C |
+| `knowledge_graph/mcp_bridge.py` | Graphify MCP server lifecycle + query bridge |
+| `output/storage.py` | Async run persistence (save/load JSON + markdown) |
+| `output/exporter.py` | Multi-format export: MD, PDF (fpdf2), DOCX, XLSX, JSON |
+| `output/mindmap.py` | AntV G6-compatible mindmap generator + node expansion |
+| `output/formatter.py` | Markdown report formatter with citation inlining |
+| `models.py` | Pydantic v2 models — single source of truth for all data |
+| `config.py` | TOML + env var config loader with deep merge |
+| `api.py` | FastAPI app — 20+ REST/SSE endpoints (including GitNexus process mgmt) |
+| `cli.py` | Typer CLI — `research run`, `research serve`, `research list-runs` |
+
+### Frontend Components (`frontend/src/`)
+
+| Component | Description |
+|-----------|-------------|
+| `App.tsx` | App shell, SSE event handling, global view toggle (Research vs Code-Arch) |
+| `components/views/ResearchProgress.tsx` | Live SSE progress display with event timeline |
+| `components/views/PlanReview.tsx` | Editable research plan UI (Phase 4) |
+| `components/views/ReportView.tsx` | Rendered Markdown report with citations |
+| `components/views/MindmapView.tsx` | AntV G6 mindmap with node expansion |
+| `components/views/ExportPanel.tsx` | Multi-format download UI |
+| `components/knowledge-graph/*` | Force-directed G6 knowledge graph, query panel, metrics |
+| `components/code-arch/GitNexusWebView.tsx`| GitNexus codebase explorer iframe UI |
+| `components/runs/RunList.tsx` | Past runs sidebar |
+
+### LLM Providers
+
+| Provider | Auth | Best For |
+|----------|------|----------|
+| **OpenRouter** (default) | `OPENROUTER_API_KEY` | Production research, large models, free tier |
+| **Groq** | `GROQ_API_KEY` | Fast inference, local dev, free tier (12k TPM) |
+
+**Free model presets:**
+
+| Name | Model ID | Strengths |
+|------|----------|-----------|
+| Nemotron 3 Super | `nvidia/nemotron-3-super-120b-a12b:free` | 1M context, agentic (default) |
+| GPT-OSS 120B | `openai/gpt-oss-120b:free` | General reasoning |
+| Qwen 3 235B | `qwen/qwen3-235b-a22b:free` | RAG, tools, multi-step |
+| Gemini Flash 1.5 | `google/gemini-flash-1.5:free` | Fast, multimodal |
+| Llama 3.3 70B | `meta-llama/llama-3.3-70b-instruct:free` | Balanced quality/speed |
+| DeepSeek R1 | `deepseek/deepseek-r1:free` | Reasoning/math |
+
+### Search Providers
+
+| Provider | API Key Required | Notes |
+|----------|-----------------|-------|
+| **DuckDuckGo** | No | Free, rate-limit hardened with retry |
+| **Tavily** | `TAVILY_API_KEY` | Higher quality results, advanced mode |
+| **Brave** | `BRAVE_SEARCH_API_KEY` | Good balance of quality and coverage |
+| **Aggregated** (`all`) | Optional | Runs all available providers concurrently, deduplicates |
+
+### Scraping Architecture
+
+Scrapling tiered fetcher chain (automatic fallback):
+
+```
+[Tier 1] StealthyFetcher (Camoufox)   — anti-fingerprint, Cloudflare bypass
+    ↓ fails
+[Tier 2] DynamicFetcher (Playwright)   — JS rendering for SPAs
+    ↓ fails  
+[Tier 3] Fetcher (httpx)               — fast basic HTTP for static pages
+```
+
+> **Note:** Camoufox requires `python -m camoufox fetch` and Playwright requires `python -m playwright install chromium` after initial install.
+
+---
+
+## Code Intelligence (GitNexus Integration)
+
+DeepResearchAgent supports **GitNexus** to index, visualize, and interact with the local repository's codebase. The GitNexus capabilities provide interactive architecture exploration via the frontend.
+
+### How It Works
+
+- **Global Navigation:** The web interface has a toggle for switching between "Research Mode" and "Code Arch" mode.
+- **On-Demand Startup:** Navigating to the Code Architecture view triggers `/gitnexus/serve/start`, starting an `npx gitnexus serve --port 4747` background process safely handled by FastAPI.
+- **Interactive UI:** The `GitNexusWebView.tsx` component binds to the server running on port 4747, providing a complete graph mapping of the local repository codebase.
+- **Shutdown:** Closing the tab or unmounting triggers `/gitnexus/serve/stop` to safely dispose of the bridge process dynamically. 
+
+_Developers writing agents utilizing this repo should check the `AGENTS.md` docs to see how to interface with `npx gitnexus` via its Model Context Protocol._
+
+---
+
+## Knowledge Graph (Graphify Integration)
+
+After each research run, the engine optionally builds a **Graphify knowledge graph** from the research corpus — transforming all findings, scraped pages, and citations into an interconnected, community-clustered knowledge map.
+
+### How It Works
+
+```
+ResearchResult
+    │
+    ▼
+_export_corpus()          # Writes findings/ + sources/ + meta/ markdown tree
+    │
+    ▼
+graphify <corpus_dir>     # Subprocess: detect → AST extract → cluster → analyze
+    │
+    ▼
+graph.json + graph.html   # Copied to outputs/{run_id}/
+    │
+    ▼
+KnowledgeGraph model      # Parsed into Pydantic, persisted as knowledge_graph.json
+    │
+    ▼
+Graphify MCP Server       # Started post-build for interactive BFS/DFS queries
+```
+
+### Querying the Graph
+
+```bash
+# From CLI (research_engine corpus graph)
+python -X utf8 -m graphify query "your question" --graph graphify-out/graph.json
+python -X utf8 -m graphify query "trace concept" --dfs --budget 1500
+python -X utf8 graphify-out/test_queries.py          # Full test suite
+
+# From the frontend
+# → Open any completed run → "Knowledge Graph" tab → use KGQueryPanel
+```
+
+### Configuration
+
+```toml
+[graphify]
+enabled = true              # Master switch
+mode = "deep"               # "fast" = AST only | "deep" = AST + LLM edges
+mcp_enabled = true          # Start MCP server after build
+mcp_port = 8765
+max_paper_enrichments = 5   # ArXiv/PDF URLs to enrich per run
+```
+
+Environment overrides: `GRAPHIFY_ENABLED`, `GRAPHIFY_MODE`, `GRAPHIFY_MCP_ENABLED`
+
+---
+
+## Research Modes
+
+### Web Research (default)
+
+Standard web-based research using the configured search providers + Scrapling.
+
+```bash
+research run "History of reinforcement learning" --mode web
+```
+
+### GitHub Code Research (MCP Integration)
+
+Uses the `@modelcontextprotocol/server-github` MCP server seamlessly wired into the orchestrator to perform high-grade DRE logic specifically localized to investigating repositories, issues, and codebases.
+
+```bash
+# Requires: GITHUB_PERSONAL_ACCESS_TOKEN in .env
+research run "How does auth middleware work in this codebase?" --mode github
+```
+
+---
+
 ## API Reference
 
 Base URL: `http://localhost:8000`  
@@ -139,6 +347,14 @@ Interactive docs: `http://localhost:8000/docs`
 | `GET` | `/runs/{id}/knowledge-graph/mcp` | MCP server status |
 | `POST` | `/runs/{id}/knowledge-graph/mcp/start` | Start Graphify MCP server |
 | `POST` | `/runs/{id}/knowledge-graph/mcp/stop` | Stop Graphify MCP server |
+
+### Code Intelligence (GitNexus)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/gitnexus/serve/status` | Current status of the external proxy server |
+| `POST` | `/gitnexus/serve/start` | Launch the proxy to the GitNexus architecture UI |
+| `POST` | `/gitnexus/serve/stop` | Safely dispose of the proxy processes |
 
 ### Utilities
 
@@ -243,211 +459,6 @@ mode = "deep"                     # "fast" (AST only) | "deep" (AST + LLM edges)
 mcp_enabled = true
 mcp_port = 8765
 max_paper_enrichments = 5         # Max ArXiv/PDF URLs to enrich per run
-```
-
----
-
-## Architecture
-
-### System Overview
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Frontend (React)                       │
-│   Mantine UI  •  AntV G6  •  SSE streaming              │
-│   Tabs: Runs │ Report │ Mindmap │ Knowledge Graph        │
-└──────────────────────┬──────────────────────────────────┘
-                       │ HTTP / SSE
-                       ▼
-┌─────────────────────────────────────────────────────────┐
-│               FastAPI REST Server (:8000)                 │
-│   /research/stream  •  /runs/*  •  /knowledge-graph/*   │
-└──────────────────────┬──────────────────────────────────┘
-                       │
-          ┌────────────┼──────────────────┐
-          ▼            ▼                  ▼
-┌─────────────┐ ┌────────────┐  ┌────────────────────┐
-│  Orchestrator│ │  LLM Layer │  │  Knowledge Graph   │
-│  DRE Loop   │ │  OpenRouter│  │  (Graphify)         │
-│  (30 cycles)│ │  / Groq    │  │  Builder+MCP Bridge│
-└──────┬──────┘ └────────────┘  └────────────────────┘
-       │
-  ┌────┴────┐
-  ▼         ▼
-┌────────┐ ┌─────────────────────────────┐
-│Planner │ │  Search + Scrape + Rerank   │
-│Crossover│ │  DDG • Tavily • Brave       │
-│Retry   │ │  Scrapling (stealth→JS→HTTP)│
-└────────┘ └─────────────────────────────┘
-```
-
-### Backend Modules (`research_engine/`)
-
-| Module | Description |
-|--------|-------------|
-| `agent/orchestrator.py` | Core DRE loop — coordinates all phases. 764 lines |
-| `agent/planner.py` | LLM-based query decomposition and plan generation |
-| `agent/searcher.py` | Search execution, content validation, query generation |
-| `agent/crossover.py` | Evolutionary candidate merging via multiple LLM calls |
-| `agent/retry.py` | Protocol-H reflective retry for low-confidence cycles |
-| `agent/context.py` | In-memory Q&A history and research state manager |
-| `llm/provider.py` | Async OpenRouter/Groq provider with structured output + fallback |
-| `llm/prompts.py` | All LLM prompt templates |
-| `sources/web_search.py` | DuckDuckGo + Tavily + Brave search providers + aggregator |
-| `sources/web_scraper.py` | Scrapling tiered fetcher (stealthy → dynamic → basic) |
-| `sources/github_search.py` | GitHub MCP client for code-aware research mode |
-| `sources/reranker.py` | LLM-based search result reranking |
-| `knowledge_graph/builder.py` | Graphify integration — corpus export → subprocess → parse |
-| `knowledge_graph/enricher.py` | ArXiv/PDF corpus enricher for strategy C |
-| `knowledge_graph/mcp_bridge.py` | Graphify MCP server lifecycle + query bridge |
-| `output/storage.py` | Async run persistence (save/load JSON + markdown) |
-| `output/exporter.py` | Multi-format export: MD, PDF (fpdf2), DOCX, XLSX, JSON |
-| `output/mindmap.py` | AntV G6-compatible mindmap generator + node expansion |
-| `output/formatter.py` | Markdown report formatter with citation inlining |
-| `models.py` | Pydantic v2 models — single source of truth for all data |
-| `config.py` | TOML + env var config loader with deep merge |
-| `api.py` | FastAPI app — 20+ REST/SSE endpoints |
-| `cli.py` | Typer CLI — `research run`, `research serve`, `research list-runs` |
-
-### Frontend Components (`frontend/src/`)
-
-| Component | Description |
-|-----------|-------------|
-| `App.tsx` | App shell, SSE event handling, tab navigation |
-| `components/views/ResearchProgress.tsx` | Live SSE progress display with event timeline |
-| `components/views/PlanReview.tsx` | Editable research plan UI (Phase 4) |
-| `components/views/ReportView.tsx` | Rendered Markdown report with citations |
-| `components/views/MindmapView.tsx` | AntV G6 mindmap with node expansion |
-| `components/views/ExportPanel.tsx` | Multi-format download UI |
-| `components/knowledge-graph/KnowledgeGraphView.tsx` | Force-directed G6 knowledge graph |
-| `components/knowledge-graph/KGStatsPanel.tsx` | Graph metrics & compression ratio |
-| `components/knowledge-graph/KGQueryPanel.tsx` | BFS/DFS graph traversal query UI |
-| `components/knowledge-graph/CommunityLegend.tsx` | Interactive community filter legend |
-| `components/runs/RunList.tsx` | Past runs sidebar |
-
-### LLM Providers
-
-| Provider | Auth | Best For |
-|----------|------|----------|
-| **OpenRouter** (default) | `OPENROUTER_API_KEY` | Production research, large models, free tier |
-| **Groq** | `GROQ_API_KEY` | Fast inference, local dev, free tier (12k TPM) |
-
-**Free model presets:**
-
-| Name | Model ID | Strengths |
-|------|----------|-----------|
-| Nemotron 3 Super | `nvidia/nemotron-3-super-120b-a12b:free` | 1M context, agentic (default) |
-| GPT-OSS 120B | `openai/gpt-oss-120b:free` | General reasoning |
-| Qwen 3 235B | `qwen/qwen3-235b-a22b:free` | RAG, tools, multi-step |
-| Gemini Flash 1.5 | `google/gemini-flash-1.5:free` | Fast, multimodal |
-| Llama 3.3 70B | `meta-llama/llama-3.3-70b-instruct:free` | Balanced quality/speed |
-| DeepSeek R1 | `deepseek/deepseek-r1:free` | Reasoning/math |
-
-### Search Providers
-
-| Provider | API Key Required | Notes |
-|----------|-----------------|-------|
-| **DuckDuckGo** | No | Free, rate-limit hardened with retry |
-| **Tavily** | `TAVILY_API_KEY` | Higher quality results, advanced mode |
-| **Brave** | `BRAVE_SEARCH_API_KEY` | Good balance of quality and coverage |
-| **Aggregated** (`all`) | Optional | Runs all available providers concurrently, deduplicates |
-
-### Scraping Architecture
-
-Scrapling tiered fetcher chain (automatic fallback):
-
-```
-[Tier 1] StealthyFetcher (Camoufox)   — anti-fingerprint, Cloudflare bypass
-    ↓ fails
-[Tier 2] DynamicFetcher (Playwright)   — JS rendering for SPAs
-    ↓ fails  
-[Tier 3] Fetcher (httpx)               — fast basic HTTP for static pages
-```
-
-> **Note:** Camoufox requires `python -m camoufox fetch` and Playwright requires `python -m playwright install chromium` after initial install.
-
----
-
-## Knowledge Graph (Graphify Integration)
-
-After each research run, the engine optionally builds a **Graphify knowledge graph** from the research corpus — transforming all findings, scraped pages, and citations into an interconnected, community-clustered knowledge map.
-
-### How It Works
-
-```
-ResearchResult
-    │
-    ▼
-_export_corpus()          # Writes findings/ + sources/ + meta/ markdown tree
-    │
-    ▼
-graphify <corpus_dir>     # Subprocess: detect → AST extract → cluster → analyze
-    │
-    ▼
-graph.json + graph.html   # Copied to outputs/{run_id}/
-    │
-    ▼
-KnowledgeGraph model      # Parsed into Pydantic, persisted as knowledge_graph.json
-    │
-    ▼
-Graphify MCP Server       # Started post-build for interactive BFS/DFS queries
-```
-
-### Querying the Graph
-
-```bash
-# From CLI (research_engine corpus graph)
-python -X utf8 -m graphify query "your question" --graph graphify-out/graph.json
-python -X utf8 -m graphify query "trace concept" --dfs --budget 1500
-python -X utf8 graphify-out/test_queries.py          # Full test suite
-
-# From the frontend
-# → Open any completed run → "Knowledge Graph" tab → use KGQueryPanel
-```
-
-### Graph Stats (research_engine corpus)
-
-From the self-analysis of this codebase:
-
-| Metric | Value |
-|--------|-------|
-| Nodes | 429 |
-| Edges | 1,428 |
-| Communities | 21 |
-| God nodes | `ResearchResult` (79), `LLMProvider` (76), `DeepResearchOrchestrator` (54) |
-
-### Configuration
-
-```toml
-[graphify]
-enabled = true              # Master switch
-mode = "deep"               # "fast" = AST only | "deep" = AST + LLM edges
-mcp_enabled = true          # Start MCP server after build
-mcp_port = 8765
-max_paper_enrichments = 5   # ArXiv/PDF URLs to enrich per run
-```
-
-Environment overrides: `GRAPHIFY_ENABLED`, `GRAPHIFY_MODE`, `GRAPHIFY_MCP_ENABLED`
-
----
-
-## Research Modes
-
-### Web Research (default)
-
-Standard web-based research using the configured search providers + Scrapling.
-
-```bash
-research run "History of reinforcement learning" --mode web
-```
-
-### GitHub Code Research
-
-Uses the `@modelcontextprotocol/server-github` MCP server to search code, read files, and analyze repositories.
-
-```bash
-# Requires: npx in PATH, GITHUB_PERSONAL_ACCESS_TOKEN in .env
-research run "How does auth middleware work in this codebase?" --mode github
 ```
 
 ---
@@ -572,6 +583,7 @@ deepresearchagent/
 │   └── src/
 │       ├── components/
 │       │   ├── knowledge-graph/   # KG visualization, stats, query panel, legend
+│       │   ├── code-arch/         # GitNexus repository explorer
 │       │   ├── views/             # Report, Mindmap, Progress, PlanReview, Export
 │       │   └── runs/              # Run list sidebar
 │       ├── api/client.ts          # Frontend API client
