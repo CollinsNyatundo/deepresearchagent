@@ -59,3 +59,7 @@ Thumbs.db
 *.log
 *.sqlite3
 *.db
+
+# Internal Test Data
+test_cypher.json
+test_cypher2.json
