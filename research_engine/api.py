@@ -252,7 +252,8 @@ async def stream_research(request: ResearchRequest):
                     break
 
         except asyncio.CancelledError:
-            logger.info("SSE client disconnected, research continues in background")
+            logger.info("SSE client disconnected, research cancelled to prevent memory leak")
+            research_task.cancel()
         except Exception as e:
             logger.error(f"SSE generator error: {e}")
             error_data = json.dumps({"error": str(e)})
@@ -371,7 +372,8 @@ async def execute_approved_plan(approval: PlanApproval):
                         yield f"event: error\ndata: {error_data}\n\n"
                     break
         except asyncio.CancelledError:
-            logger.info("SSE client disconnected from plan execution")
+            logger.info("SSE client disconnected from plan execution, research cancelled to prevent memory leak")
+            research_task.cancel()
         except Exception as e:
             logger.error(f"SSE generator error: {e}")
 
@@ -418,6 +420,12 @@ async def expand_mindmap_node(run_id: str, request: ExpandRequest):
 
     llm = LLMProvider(config.llm)
     model = request.model  # Optional per-request model override
+    
+    if model:
+        try:
+            validate_model_id(model)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     expansion = await do_expand(node, context, llm=llm, model=model)
 
@@ -788,8 +796,9 @@ async def stop_gitnexus_serve():
     global _gitnexus_serve_proc  # noqa: PLW0603
 
     proc = _gitnexus_serve_proc
+    _gitnexus_serve_proc = None
+
     if proc is None or proc.returncode is not None:
-        _gitnexus_serve_proc = None
         return {"status": "not_running", "message": "gitnexus serve is not running."}
 
     try:
@@ -799,7 +808,6 @@ async def stop_gitnexus_serve():
         except asyncio.TimeoutError:
             proc.kill()
         pid = proc.pid
-        _gitnexus_serve_proc = None
         logger.info("GitNexus serve stopped (PID %d)", pid)
         return {"status": "stopped", "pid": pid}
     except Exception as e:

@@ -117,6 +117,7 @@ class ResearchStep(BaseModel):
     plan_updated: bool = False
     progress: int | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    needs_more_research: bool = False
 
 
 class ResearchResult(BaseModel):

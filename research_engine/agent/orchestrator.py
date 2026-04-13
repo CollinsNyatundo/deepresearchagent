@@ -279,7 +279,8 @@ class DeepResearchOrchestrator:
         ) as progress:
             task = progress.add_task("Researching...", total=max_cycles)
 
-            for cycle in range(max_cycles):
+            cycle = 0
+            while cycle < max_cycles:
                 progress.update(
                     task,
                     description=f"[cyan]Cycle {cycle + 1}/{max_cycles}[/cyan]",
@@ -347,6 +348,16 @@ class DeepResearchOrchestrator:
                             )
                             break
 
+                    if getattr(step, "needs_more_research", False):
+                        absolute_max = self.config.research.max_cycles + 3
+                        if max_cycles < absolute_max:
+                            max_cycles += 1
+                            progress.update(task, total=max_cycles)
+                            console.print(f"   [bold yellow]⚠ Confidence low, triggered additional research cycle. Total cycles: {max_cycles}[/bold yellow]")
+                            await self._emit(event_queue, "message", {
+                                "message": f"Low confidence triggered additional research cycle (total {max_cycles})"
+                            })
+
                 except Exception as e:
                     error_msg = f"Cycle {cycle + 1} failed: {type(e).__name__}: {e}"
                     logger.error(error_msg)
@@ -355,7 +366,10 @@ class DeepResearchOrchestrator:
                     await self._emit(event_queue, ResearchState.ERROR, {
                         "cycle": cycle + 1, "error": error_msg,
                     })
+                    cycle += 1
                     continue
+
+                cycle += 1
 
         # ── Generate report ────────────────────────────────────────
         await self._emit(event_queue, ResearchState.GENERATING_REPORT, {
@@ -646,6 +660,7 @@ class DeepResearchOrchestrator:
             search_results=search_results,
             scraped_pages=scraped_pages,
             answer=answer,
+            needs_more_research=confidence.needs_more_research,
         )
 
     # ═════════════════════════════════════════════════════════════════

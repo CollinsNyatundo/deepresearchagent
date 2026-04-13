@@ -63,3 +63,7 @@ Thumbs.db
 # Internal Test Data
 test_cypher.json
 test_cypher2.json
+
+# Local Audit and Agent Metadata
+.agents/
+global_skills_catalog.md
