@@ -1,6 +1,6 @@
 # 🔬 Deep Research Agent
 
-> Perplexity-grade, autonomous deep research engine with interactive mindmap visualization, knowledge graph extraction, multi-provider LLM + search support, and code intelligence.
+> Autonomous deep research engine with interactive mindmap visualization, knowledge graph extraction, multi-provider LLM + search support, and code intelligence.
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green?logo=fastapi)](https://fastapi.tiangolo.com)
