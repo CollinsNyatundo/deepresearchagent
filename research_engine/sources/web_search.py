@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class SearchProvider(Protocol):
     """Interface for async web search providers."""
 
-    async def search(self, query: str, max_results: int = 10) -> list[SearchResult]: ...
+    async def search(self, query: str, max_results: int = 10, **kwargs) -> list[SearchResult]: ...
 
 
 # ─── DuckDuckGo (free, no API key, rate-limit hardened) ──────────────
@@ -35,7 +35,7 @@ class DuckDuckGoSearch:
 
     _last_search_time: float = 0.0
 
-    async def search(self, query: str, max_results: int = 10) -> list[SearchResult]:
+    async def search(self, query: str, max_results: int = 10, **kwargs) -> list[SearchResult]:
         """Search DuckDuckGo with rate-limit hardening."""
         # ddgs v9+ renamed DuckDuckGoSearchException -> DDGSException.
         # duckduckgo_search package has been uninstalled — ddgs is the sole provider.
@@ -106,11 +106,21 @@ class TavilySearch:
     def __init__(self, api_key: str = ""):
         self.api_key = api_key or os.environ.get("TAVILY_API_KEY", "")
 
-    async def search(self, query: str, max_results: int = 10) -> list[SearchResult]:
+    async def search(self, query: str, max_results: int = 10, **kwargs) -> list[SearchResult]:
         """Search via Tavily API."""
         if not self.api_key:
             logger.debug("TAVILY_API_KEY not set, skipping Tavily search")
             return []
+
+        upgrade_context = kwargs.get("upgrade_context", False)
+        payload = {
+            "api_key": self.api_key,
+            "query": query,
+            "max_results": max_results if not upgrade_context else max(max_results, 8),
+            "search_depth": "advanced",
+        }
+        if upgrade_context:
+            payload["include_raw_content"] = True
 
         try:
             import httpx
@@ -118,12 +128,7 @@ class TavilySearch:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
                     "https://api.tavily.com/search",
-                    json={
-                        "api_key": self.api_key,
-                        "query": query,
-                        "max_results": max_results,
-                        "search_depth": "advanced",
-                    },
+                    json=payload,
                 )
                 resp.raise_for_status()
                 data = resp.json()
@@ -153,7 +158,7 @@ class BraveSearchProvider:
     def __init__(self, api_key: str = ""):
         self.api_key = api_key or os.environ.get("BRAVE_SEARCH_API_KEY", "")
 
-    async def search(self, query: str, max_results: int = 10) -> list[SearchResult]:
+    async def search(self, query: str, max_results: int = 10, **kwargs) -> list[SearchResult]:
         """Search via Brave Search API."""
         if not self.api_key:
             logger.debug("BRAVE_SEARCH_API_KEY not set, skipping Brave search")
@@ -190,6 +195,121 @@ class BraveSearchProvider:
             return []
 
 
+# ─── Exa Search (neural / semantic, requires EXA_API_KEY) ───────────
+
+class ExaSearch:
+    """Exa search API — neural/semantic search, requires EXA_API_KEY."""
+
+    def __init__(self, api_key: str = ""):
+        self.api_key = api_key or os.environ.get("EXA_API_KEY", "")
+
+    async def search(self, query: str, max_results: int = 10, **kwargs) -> list[SearchResult]:
+        """Search via Exa API."""
+        if not self.api_key:
+            logger.debug("EXA_API_KEY not set, skipping Exa search")
+            return []
+
+        upgrade_context = kwargs.get("upgrade_context", False)
+        try:
+            import httpx
+
+            headers = {
+                "accept": "application/json",
+                "content-type": "application/json",
+                "x-api-key": self.api_key,
+            }
+            payload = {
+                "query": query,
+                "use_autoprompt": True,
+                "num_results": max_results,
+            }
+            if not upgrade_context:
+                payload["highlights"] = {"num_sentences": 3}
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    "https://api.exa.ai/search",
+                    json=payload,
+                    headers=headers,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+            results = []
+            for r in data.get("results", []):
+                highlights_list = r.get("highlights", [])
+                if highlights_list and isinstance(highlights_list, list):
+                    snippet = " ".join(highlights_list)
+                else:
+                    snippet = r.get("text", "") or r.get("snippet", "")
+                
+                results.append(
+                    SearchResult(
+                        url=r.get("url", ""),
+                        title=r.get("title", ""),
+                        snippet=snippet[:500],
+                        score=r.get("score", 0.0),
+                    )
+                )
+            logger.info(f"Exa returned {len(results)} results for: {query}")
+            return results
+        except Exception as e:
+            logger.error(f"Exa search failed: {e}")
+            return []
+
+
+# ─── Parallel AI Search (token-dense, requires PARALLEL_API_KEY) ───
+
+class ParallelAISearch:
+    """Parallel AI search API — token-dense search, requires PARALLEL_API_KEY."""
+
+    def __init__(self, api_key: str = ""):
+        self.api_key = api_key or os.environ.get("PARALLEL_API_KEY", "")
+
+    async def search(self, query: str, max_results: int = 10, **kwargs) -> list[SearchResult]:
+        """Search via Parallel AI API."""
+        if not self.api_key:
+            logger.debug("PARALLEL_API_KEY not set, skipping Parallel AI search")
+            return []
+
+        try:
+            import httpx
+
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "query": query,
+                "limit": max_results,
+            }
+
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(
+                    "https://api.parallel.ai/v1/search",
+                    json=payload,
+                    headers=headers,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+            results = []
+            for r in data.get("results", []):
+                results.append(
+                    SearchResult(
+                        url=r.get("url", ""),
+                        title=r.get("title", ""),
+                        snippet=(r.get("excerpt", "") or r.get("snippet", ""))[:500],
+                        score=r.get("score", 0.0),
+                    )
+                )
+            logger.info(f"Parallel AI returned {len(results)} results for: {query}")
+            return results
+        except Exception as e:
+            logger.error(f"Parallel AI search failed: {e}")
+            return []
+
+
 # ─── Aggregated Multi-Provider Search ────────────────────────────────
 
 class AggregatedSearchProvider:
@@ -203,13 +323,13 @@ class AggregatedSearchProvider:
     def __init__(self, providers: list[SearchProvider]):
         self.providers = providers
 
-    async def search(self, query: str, max_results: int = 10) -> list[SearchResult]:
+    async def search(self, query: str, max_results: int = 10, **kwargs) -> list[SearchResult]:
         """Run all providers concurrently, merge and deduplicate results."""
         if not self.providers:
             logger.error("AggregatedSearchProvider has no providers!")
             return []
 
-        tasks = [p.search(query, max_results) for p in self.providers]
+        tasks = [p.search(query, max_results, **kwargs) for p in self.providers]
         all_results = await asyncio.gather(*tasks, return_exceptions=True)
 
         merged: list[SearchResult] = []
@@ -266,6 +386,10 @@ def get_search_provider(
             return TavilySearch(api_key=config.tavily_api_key)
         case "brave":
             return BraveSearchProvider(api_key=config.brave_api_key)
+        case "exa":
+            return ExaSearch(api_key=config.exa_api_key)
+        case "parallel" | "parallel_ai":
+            return ParallelAISearch(api_key=config.parallel_api_key)
         case "all" | "multi" | "aggregated":
             # Build list of all available providers
             providers: list[SearchProvider] = [DuckDuckGoSearch()]
@@ -281,6 +405,18 @@ def get_search_provider(
                 logger.info("Brave search enabled")
             else:
                 logger.debug("Brave API key not configured, skipping")
+
+            if config.exa_api_key:
+                providers.append(ExaSearch(api_key=config.exa_api_key))
+                logger.info("Exa search enabled")
+            else:
+                logger.debug("Exa API key not configured, skipping")
+
+            if config.parallel_api_key:
+                providers.append(ParallelAISearch(api_key=config.parallel_api_key))
+                logger.info("Parallel AI search enabled")
+            else:
+                logger.debug("Parallel AI API key not configured, skipping")
 
             logger.info(f"Aggregated search with {len(providers)} provider(s)")
             return AggregatedSearchProvider(providers)

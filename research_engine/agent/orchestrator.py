@@ -46,6 +46,8 @@ from research_engine.models import (
     ResearchState,
     ResearchStep,
     SearchQuery,
+    QueryIntent,
+    QueryIntentCategory,
 )
 from research_engine.output.mindmap import build_mindmap_graph
 from research_engine.output.storage import save_knowledge_graph, save_run
@@ -83,6 +85,28 @@ class DeepResearchOrchestrator:
         self.config = config or get_config()
         self.llm = LLMProvider(self.config.llm)
         self.scraper = WebScraper(self.config.scraping)
+
+    async def _classify_intent(
+        self,
+        query: str,
+        model: str,
+        provider: str | None = None,
+    ) -> QueryIntent:
+        """Classify the query intent and determine domains to prioritize / avoid."""
+        from research_engine.llm.prompts import QUERY_INTENT_CLASSIFICATION_TEMPLATE
+
+        prompt = QUERY_INTENT_CLASSIFICATION_TEMPLATE.format(topic=query)
+        try:
+            res = await self.llm.call_structured(prompt, QueryIntent, model=model, provider=provider)
+            intent = QueryIntent(**res)
+            logger.info(f"Classified query intent: {intent.category.value} (rationale: {intent.rationale})")
+            return intent
+        except Exception as e:
+            logger.warning(f"Query intent classification failed: {e}. Falling back to general.")
+            return QueryIntent(
+                category=QueryIntentCategory.GENERAL,
+                rationale=f"Fallback due to classification error: {e}",
+            )
 
     # ═════════════════════════════════════════════════════════════════
     # Public API
@@ -128,29 +152,55 @@ class DeepResearchOrchestrator:
         console.print(f"   Model: {model}")
         console.print(f"   Depth: {request.depth} (max {max_cycles} cycles)\n")
 
-        # ── Plan generation ────────────────────────────────────────
-        await self._emit(event_queue, ResearchState.PLANNING, {
-            "message": "Creating research plan...",
+        # ── Intent classification ──────────────────────────────────
+        await self._emit(event_queue, ResearchState.CLASSIFYING_INTENT, {
+            "message": "Analyzing query intent...",
         })
-        console.print("[yellow]📋 Creating research plan...[/yellow]")
+        console.print("[yellow]🔍 Analyzing query intent...[/yellow]")
+        intent = await self._classify_intent(request.query, model, provider=request.provider)
+        console.print(f"   Category: [bold cyan]{intent.category.value}[/bold cyan]")
+        console.print(f"   Rationale: {intent.rationale}")
+        if intent.target_domains:
+            console.print(f"   Target domains: {intent.target_domains}")
+        if intent.avoid_domains:
+            console.print(f"   Avoid domains: {intent.avoid_domains}")
 
-        plan = await planner_module.create_plan(
-            request.query, llm=self.llm, model=model, provider=request.provider
-        )
+        # ── Plan generation ────────────────────────────────────────
+        if intent.steps_override:
+            console.print(f"   Using intent-based plan steps override: {len(intent.steps_override)} steps")
+            plan = ResearchPlan(steps=intent.steps_override)
+        else:
+            await self._emit(event_queue, ResearchState.PLANNING, {
+                "message": "Creating research plan...",
+            })
+            console.print("[yellow]📋 Creating research plan...[/yellow]")
+            plan = await planner_module.create_plan(
+                request.query, llm=self.llm, model=model, provider=request.provider
+            )
 
         # ── Query decomposition ────────────────────────────────────
-        await self._emit(event_queue, ResearchState.DECOMPOSING, {
-            "message": "Decomposing query into sub-queries...",
-        })
-        sub_queries = await planner_module.decompose_query(
-            request.query, llm=self.llm, model=model, provider=request.provider
-        )
+        if intent.sub_queries:
+            console.print(f"   Using intent-based sub-queries override: {intent.sub_queries}")
+            sub_queries = intent.sub_queries
+        else:
+            await self._emit(event_queue, ResearchState.DECOMPOSING, {
+                "message": "Decomposing query into sub-queries...",
+            })
+            sub_queries = await planner_module.decompose_query(
+                request.query, llm=self.llm, model=model, provider=request.provider
+            )
         console.print(f"   Sub-queries: {sub_queries}")
 
         await self._emit(event_queue, ResearchState.PLAN_READY, {
             "plan": {"steps": plan.steps},
             "step_count": len(plan.steps),
             "sub_queries": sub_queries,
+            "intent": {
+                "category": intent.category.value,
+                "rationale": intent.rationale,
+                "target_domains": intent.target_domains,
+                "avoid_domains": intent.avoid_domains,
+            }
         })
 
         return await self._execute_research_loop(
@@ -164,6 +214,7 @@ class DeepResearchOrchestrator:
             max_cycles=max_cycles,
             request=request,
             event_queue=event_queue,
+            intent=intent,
         )
 
     async def run_with_plan(
@@ -206,6 +257,19 @@ class DeepResearchOrchestrator:
         console.print(f"   Steps: {len(approval.plan.steps)} (user-approved)")
         console.print(f"   Model: {model}\n")
 
+        # ── Intent classification ──────────────────────────────────
+        await self._emit(event_queue, ResearchState.CLASSIFYING_INTENT, {
+            "message": "Analyzing query intent...",
+        })
+        console.print("[yellow]🔍 Analyzing query intent...[/yellow]")
+        intent = await self._classify_intent(approval.query, model, provider=approval.provider)
+        console.print(f"   Category: [bold cyan]{intent.category.value}[/bold cyan]")
+        console.print(f"   Rationale: {intent.rationale}")
+        if intent.target_domains:
+            console.print(f"   Target domains: {intent.target_domains}")
+        if intent.avoid_domains:
+            console.print(f"   Avoid domains: {intent.avoid_domains}")
+
         await self._emit(event_queue, ResearchState.INITIALIZING, {
             "run_id": run_id,
             "query": approval.query,
@@ -221,6 +285,12 @@ class DeepResearchOrchestrator:
             "step_count": len(plan.steps),
             "sub_queries": sub_queries,
             "plan_source": "user_approved",
+            "intent": {
+                "category": intent.category.value,
+                "rationale": intent.rationale,
+                "target_domains": intent.target_domains,
+                "avoid_domains": intent.avoid_domains,
+            }
         })
 
         # Fake a ResearchRequest from the approval for the loop
@@ -246,6 +316,7 @@ class DeepResearchOrchestrator:
             request=request,
             event_queue=event_queue,
             initial_plan=plan,  # Bypass plan regeneration
+            intent=intent,
         )
 
     # ═════════════════════════════════════════════════════════════════
@@ -265,6 +336,7 @@ class DeepResearchOrchestrator:
         request: ResearchRequest,
         event_queue: asyncio.Queue | None,
         initial_plan: ResearchPlan | None = None,
+        intent: QueryIntent | None = None,
     ) -> ResearchResult:
         """Shared research loop used by both run() and run_with_plan()."""
         context = ctx_module.ResearchContext()
@@ -298,6 +370,7 @@ class DeepResearchOrchestrator:
                         model=model,
                         request=request,
                         event_queue=event_queue,
+                        intent=intent,
                     )
                     await context.add_step(step)
 
@@ -430,6 +503,7 @@ class DeepResearchOrchestrator:
                     result=result,
                     run_dir=output_path,
                     graphify_mode=self.config.graphify.mode,
+                    llm=self.llm,
                 )
                 await save_knowledge_graph(kg, run_id)
 
@@ -494,6 +568,7 @@ class DeepResearchOrchestrator:
         model: str,
         request: ResearchRequest,
         event_queue: asyncio.Queue | None = None,
+        intent: QueryIntent | None = None,
     ) -> ResearchStep:
         """Execute a single research cycle: query → search → rerank → scrape → validate → synthesize.
 
@@ -506,6 +581,23 @@ class DeepResearchOrchestrator:
         6. Synthesize answer
         7. Assess confidence — retry with broader query if < threshold
         """
+        # ── Determine if context needs upgrade (adaptive context window) ──
+        upgrade_context = False
+        if cycle > 0 and context.steps:
+            last_step = context.steps[-1]
+            if last_step.confidence_score is not None and last_step.confidence_score < 0.5:
+                upgrade_context = True
+                logger.info(f"Cycle {cycle + 1}: Low confidence detected in previous cycle (<0.5). Upgrading context window payload.")
+                console.print(f"   [yellow]⚡ Low confidence in previous cycle. Upgrading context parameters.[/yellow]")
+
+        # ── Resolve search provider dynamically if not in github mode ────
+        cycle_search_provider = search_provider
+        if getattr(request, "mode", "web") != "github":
+            if not request.search_provider or request.search_provider in ("all", "aggregated", "multi"):
+                from research_engine.agent.router import AgenticSearchRouter, RoutedSearchProvider
+                routing_key = AgenticSearchRouter.classify_search_intent(intent)
+                cycle_search_provider = RoutedSearchProvider(routing_key, self.config.search)
+
         # ── Generate search query ──────────────────────────────────
         query = await searcher_module.generate_query(
             topic, plan, context.get_history_text(), llm=self.llm, model=model, provider=request.provider
@@ -523,9 +615,14 @@ class DeepResearchOrchestrator:
         try:
             search_results, scraped_pages = await searcher_module.search_and_scrape(
                 query,
-                search_provider=search_provider,
+                search_provider=cycle_search_provider,
                 scraper=scraper,
                 max_pages=request.max_pages,
+                intent=intent,
+                llm=self.llm,
+                model=model,
+                provider=request.provider,
+                upgrade_context=upgrade_context,
             )
         except Exception as e:
             logger.warning(f"Search/scrape failed in cycle {cycle + 1}: {e}")
@@ -559,9 +656,14 @@ class DeepResearchOrchestrator:
                 try:
                     search_results, scraped_pages = await searcher_module.search_and_scrape(
                         query,
-                        search_provider=search_provider,
+                        search_provider=cycle_search_provider,
                         scraper=scraper,
                         max_pages=request.max_pages,
+                        intent=intent,
+                        llm=self.llm,
+                        model=model,
+                        provider=request.provider,
+                        upgrade_context=upgrade_context,
                     )
                 except Exception as retry_err:
                     logger.error(f"Retry also failed: {retry_err}")
@@ -584,6 +686,27 @@ class DeepResearchOrchestrator:
             "cycle": cycle + 1,
             "urls_scraped": len(scraped_pages),
             "successful": sum(1 for p in scraped_pages if p.success),
+            "pages": [
+                {
+                    "url": p.url,
+                    "title": p.title,
+                    "success": p.success,
+                    "fetcher_used": p.fetcher_used,
+                    "content_length": p.content_length,
+                    "original_status": p.original_status,
+                    "fallback_attempts": p.fallback_attempts,
+                }
+                for p in scraped_pages
+            ],
+            "search_results": [
+                {
+                    "url": r.url,
+                    "title": r.title,
+                    "relevance_score": r.relevance_score,
+                    "eval_rationale": r.eval_rationale,
+                }
+                for r in search_results
+            ]
         })
 
         # ── Result validation via searcher module ──────────────────
@@ -661,6 +784,7 @@ class DeepResearchOrchestrator:
             scraped_pages=scraped_pages,
             answer=answer,
             needs_more_research=confidence.needs_more_research,
+            confidence_score=confidence.score,
         )
 
     # ═════════════════════════════════════════════════════════════════

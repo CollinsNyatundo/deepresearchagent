@@ -642,10 +642,12 @@ async def build_knowledge_graph(run_id: str):
 
     run_dir = Path(DEFAULT_OUTPUT_DIR) / run_id
     try:
+        llm = LLMProvider(config.llm)
         kg = await kg_builder.build_knowledge_graph(
             result=result,
             run_dir=run_dir,
             graphify_mode=config.graphify.mode,
+            llm=llm,
         )
         await save_knowledge_graph(kg, run_id)
         return kg
