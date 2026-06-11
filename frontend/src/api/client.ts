@@ -362,6 +362,16 @@ export const api = {
     const res = await fetch(`${BASE_URL}/gitnexus/serve/status`);
     return handleResponse(res);
   },
+
+  /** Open a file in the local editor. */
+  async openFile(path: string): Promise<{ status: string; message?: string }> {
+    const res = await fetch(`${BASE_URL}/open-file`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    });
+    return handleResponse<{ status: string; message?: string }>(res);
+  },
 };
 
 

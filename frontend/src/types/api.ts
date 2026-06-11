@@ -215,3 +215,8 @@ export type KGAvailability = {
   graph_html_available: boolean;
 };
 
+export type OpenFileRequest = {
+  path: string;
+};
+
+

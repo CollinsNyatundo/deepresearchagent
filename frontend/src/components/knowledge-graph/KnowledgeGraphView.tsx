@@ -42,6 +42,7 @@ import {
   IconCrown,
   IconNetwork,
   IconSearch,
+  IconFileCode,
 } from '@tabler/icons-react';
 import { api } from '../../api/client';
 import type { KnowledgeGraph, KGNode } from '../../types/api';
@@ -541,9 +542,30 @@ export function KnowledgeGraphView({ runId }: KnowledgeGraphViewProps) {
                     )}
 
                     {selectedNode.file_path && (
-                      <Text size="xs" c="dimmed" ff="monospace">
-                        {selectedNode.file_path}
-                      </Text>
+                      <Group gap="xs" justify="space-between" align="center" mt="xs">
+                        <Text size="xs" c="dimmed" ff="monospace" style={{ wordBreak: 'break-all', flex: 1 }}>
+                          {selectedNode.file_path}
+                        </Text>
+                        <Tooltip label="Open in local editor (Cursor / VS Code)" withArrow>
+                          <ActionIcon
+                            size="sm"
+                            variant="light"
+                            color="indigo"
+                            onClick={async () => {
+                              if (selectedNode.file_path) {
+                                try {
+                                  await api.openFile(selectedNode.file_path);
+                                } catch (err) {
+                                  console.error('Failed to open file:', err);
+                                  alert(`Failed to open file in editor: ${err instanceof Error ? err.message : String(err)}`);
+                                }
+                              }
+                            }}
+                          >
+                            <IconFileCode size={14} />
+                          </ActionIcon>
+                        </Tooltip>
+                      </Group>
                     )}
                   </Stack>
                 )}

@@ -50,10 +50,10 @@ from research_engine.models import (
     KnowledgeGraph,
     MindmapGraph,
     NodeExpansion,
+    OpenFileRequest,
     PlanApproval,
     PlanPreview,
     ResearchRequest,
-    ResearchResult,
     RunSummary,
 )
 from research_engine.output.storage import (
@@ -237,7 +237,7 @@ async def stream_research(request: ResearchRequest):
 
                     if event_name == "complete":
                         break
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     # Heartbeat to keep connection alive
                     yield ": heartbeat\n\n"
 
@@ -360,7 +360,7 @@ async def execute_approved_plan(approval: PlanApproval):
 
                     if event_name == "complete":
                         break
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ": heartbeat\n\n"
 
                 if research_task.done():
@@ -420,7 +420,7 @@ async def expand_mindmap_node(run_id: str, request: ExpandRequest):
 
     llm = LLMProvider(config.llm)
     model = request.model  # Optional per-request model override
-    
+
     if model:
         try:
             validate_model_id(model)
@@ -607,6 +607,7 @@ async def get_knowledge_graph(run_id: str):
 async def get_knowledge_graph_html(run_id: str):
     """Download the Graphify interactive graph.html for a run."""
     from pathlib import Path
+
     from research_engine.output.storage import DEFAULT_OUTPUT_DIR
 
     html_path = Path(DEFAULT_OUTPUT_DIR) / run_id / "graph.html"
@@ -630,6 +631,7 @@ async def build_knowledge_graph(run_id: str):
     or when re-building with a different mode.
     """
     from pathlib import Path
+
     from research_engine.knowledge_graph import builder as kg_builder
     from research_engine.output.storage import DEFAULT_OUTPUT_DIR
 
@@ -686,6 +688,7 @@ async def get_mcp_status(run_id: str):
 async def start_mcp_server(run_id: str):
     """Start the Graphify MCP server for a run."""
     from pathlib import Path
+
     from research_engine.knowledge_graph import mcp_bridge as kg_mcp
     from research_engine.output.storage import DEFAULT_OUTPUT_DIR
 
@@ -781,7 +784,7 @@ async def start_gitnexus_serve(port: int = 4747):
             "status": "started",
             "port": port,
             "pid": _gitnexus_serve_proc.pid,
-            "web_ui_url": f"https://gitnexus.vercel.app",
+            "web_ui_url": "https://gitnexus.vercel.app",
             "message": f"gitnexus serve is running on port {port}. Open https://gitnexus.vercel.app in your browser.",
         }
     except Exception as e:
@@ -805,7 +808,7 @@ async def stop_gitnexus_serve():
         proc.terminate()
         try:
             await asyncio.wait_for(proc.wait(), timeout=5.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
         pid = proc.pid
         logger.info("GitNexus serve stopped (PID %d)", pid)
@@ -834,3 +837,102 @@ async def gitnexus_serve_status():
         "port": 4747,
         "web_ui_url": "https://gitnexus.vercel.app",
     }
+
+
+@app.post("/open-file")
+async def open_file(request: OpenFileRequest):
+    """Open a file in the local editor (Cursor/VS Code) or fallback system opener.
+
+    Translates the incoming POSIX relative path back to a platform-native absolute path,
+    preventing path traversal and arbitrary execution.
+    """
+    import os
+    import shutil
+    import sys
+    from pathlib import Path
+
+    project_root = Path(__file__).parent.parent.resolve()
+    # Convert POSIX relative path to platform native format
+    relative_path = request.path.replace("/", os.sep)
+    abs_path = (project_root / relative_path).resolve()
+
+    # 1. Prevent path traversal by ensuring the resolved path is inside project_root
+    try:
+        abs_path.relative_to(project_root)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Access denied: path is outside the project root.",
+        )
+
+    if not abs_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"File not found: {request.path} (resolved: {abs_path})",
+        )
+
+    # 2. Prevent arbitrary execution by limiting allowed extensions
+    allowed_extensions = {
+        ".py", ".ts", ".tsx", ".js", ".jsx", ".json", ".md", ".txt", ".toml",
+        ".yaml", ".yml", ".ini", ".cfg", ".css", ".scss", ".html", ".sh",
+        ".sql", ".properties", ".xml", ".graphql", ".go", ".rs", ".java", ".c",
+        ".cpp", ".h", ".cs", ".gitignore", ".env", ".example", ".lock"
+    }
+    if abs_path.suffix.lower() not in allowed_extensions:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: opening files of this type is not allowed.",
+        )
+
+    # Try cursor first, then code
+    editor = None
+    if shutil.which("cursor"):
+        editor = "cursor"
+    elif shutil.which("code"):
+        editor = "code"
+
+    try:
+        if editor:
+            if sys.platform == "win32":
+                # On Windows, wrap paths in double quotes to prevent shell injection.
+                # Double quotes are invalid in Windows filenames, making this completely safe.
+                cmd_str = f'"{editor}" "{abs_path}"'
+                proc = await asyncio.create_subprocess_shell(
+                    cmd_str,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+            else:
+                proc = await asyncio.create_subprocess_exec(
+                    editor, str(abs_path),
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+
+            # 3. Prevent zombie process leak on Unix/WSL by scheduling wait task
+            asyncio.create_task(proc.wait())
+            return {"status": "success", "message": f"Opened {request.path} in {editor}"}
+        else:
+            # Fallback to system-native opener
+            if sys.platform == "win32":
+                await asyncio.to_thread(os.startfile, str(abs_path))
+            else:
+                has_xdg = shutil.which("xdg-open")
+                has_open = shutil.which("open")
+                opener = "xdg-open" if has_xdg else ("open" if has_open else None)
+                if opener:
+                    proc = await asyncio.create_subprocess_exec(
+                        opener, str(abs_path),
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    asyncio.create_task(proc.wait())
+                else:
+                    raise RuntimeError("No suitable editor (cursor/code) or system opener found.")
+            return {"status": "success", "message": f"Opened {request.path} with system default"}
+    except Exception as e:
+        logger.error(f"Failed to open file {abs_path}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to open file: {str(e)}"
+        )

@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
-
 
 # ─── Request / Config ────────────────────────────────────────────────
 
@@ -92,7 +91,7 @@ class Citation(BaseModel):
     url: str
     title: str = ""
     domain: str = ""
-    accessed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    accessed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     snippet: str = ""
 
 
@@ -116,7 +115,7 @@ class ResearchStep(BaseModel):
     reflection: ResearchPlanReflection | None = None
     plan_updated: bool = False
     progress: int | None = None
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     needs_more_research: bool = False
 
 
@@ -132,8 +131,8 @@ class ResearchResult(BaseModel):
     report: str = ""  # Final Markdown report
     citations: list[Citation] = Field(default_factory=list)
     progress: int = 0
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    completed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    completed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     errors: list[str] = Field(default_factory=list)
 
 
@@ -245,7 +244,7 @@ class KnowledgeGraph(BaseModel):
     communities: list[KGCommunity] = Field(default_factory=list)
     god_nodes: list[str] = Field(default_factory=list)     # Node IDs of highest-degree nodes
     surprise_edges: list[SurpriseEdge] = Field(default_factory=list)
-    built_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    built_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     graphify_version: str = ""
     graph_html_available: bool = False
     corpus_stats: dict[str, Any] = Field(default_factory=dict)
@@ -305,7 +304,7 @@ class ResearchEvent(BaseModel):
 
     event: str  # ResearchState value or custom event name
     data: dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 # ─── Protocol-H Patterns (Phase 6) ──────────────────────────────────
@@ -384,3 +383,10 @@ class PlanApproval(BaseModel):
     provider: str | None = None
     mode: ResearchMode = ResearchMode.WEB
     export_formats: list[str] = Field(default_factory=lambda: ["markdown", "pdf"])
+
+
+class OpenFileRequest(BaseModel):
+    """Request payload to open a file in the local editor."""
+
+    path: str
+

@@ -80,7 +80,7 @@ def run(
     """Run a deep research query and generate a report + mindmap."""
     _setup_logging(verbose)
 
-    from research_engine.models import ResearchRequest, ResearchMode
+    from research_engine.models import ResearchMode, ResearchRequest
 
     request = ResearchRequest(
         query=query,
@@ -134,7 +134,7 @@ def serve(
 
     _setup_logging()
 
-    console.print(f"\n[bold blue]🚀 Starting Deep Research API[/bold blue]")
+    console.print("\n[bold blue]🚀 Starting Deep Research API[/bold blue]")
     console.print(f"   http://{host}:{port}")
     console.print(f"   Docs: http://{host}:{port}/docs\n")
 
@@ -282,11 +282,32 @@ async def _run_gitnexus_wiki(gist: bool, output: str | None) -> None:
         import re
         urls = re.findall(r"https://[^\s]+", output_text)
         if urls:
-            console.print(f"\n[bold green]📚 Wiki published! Open in browser:[/bold green]")
+            console.print("\n[bold green]📚 Wiki published! Open in browser:[/bold green]")
             for url in urls:
                 console.print(f"  [link={url}]{url}[/link]")
     else:
         console.print("[bold green]📚 Wiki generated in .gitnexus/wiki/[/bold green]")
+
+
+@app.command()
+def setup_shims() -> None:
+    """Setup Windows/WSL path shims/wrappers for GitNexus and ast-grep.
+
+    Creates Windows .cmd shims in %USERPROFILE%/.bin (delegating to WSL)
+    or WSL bash wrappers in ~/.local/bin (delegating to Windows) to enable
+    seamless mixed-environment execution.
+    """
+    from research_engine.setup_shims import setup_shims as run_setup
+
+    console.print("[blue]Setting up shims/wrappers for GitNexus and ast-grep…[/blue]")
+    try:
+        created, message = run_setup()
+        for path in created:
+            console.print(f"  [green]✔[/green] Created: {path}")
+        console.print(f"\n[bold green]✅ {message}[/bold green]")
+    except Exception as e:
+        console.print(f"\n[bold red]Failed to setup shims: {e}[/bold red]")
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":
