@@ -240,10 +240,9 @@ class WebScraper:
         if availability.get("dynamic") and tier in ("dynamic", "stealthy", "all"):
             async def _dynamic_fetch(url: str, _timeout: float = timeout_s):
                 from scrapling.fetchers import DynamicFetcher
-                # DynamicFetcher.get() is sync — wrap in to_thread
-                fetcher = DynamicFetcher(headless=True, disable_resources=True)
-                return await asyncio.to_thread(
-                    fetcher.get, url, follow_redirects=True, timeout=_timeout
+                # DynamicFetcher.async_fetch is natively async
+                return await DynamicFetcher.async_fetch(
+                    url, headless=True, disable_resources=True, timeout=int(_timeout * 1000)
                 )
 
             chain.append(("dynamic_fetcher", _dynamic_fetch))
@@ -252,10 +251,9 @@ class WebScraper:
         if availability.get("stealthy_patchright") and tier in ("stealthy", "all"):
             async def _stealthy_patchright_fetch(url: str, _timeout: float = timeout_s):
                 from scrapling.fetchers import StealthyFetcher
-                # StealthyFetcher.get() is sync — wrap in to_thread
-                fetcher = StealthyFetcher(headless=True)
-                return await asyncio.to_thread(
-                    fetcher.get, url, follow_redirects=True, timeout=_timeout
+                # StealthyFetcher.async_fetch is natively async
+                return await StealthyFetcher.async_fetch(
+                    url, headless=True, timeout=int(_timeout * 1000)
                 )
 
             chain.append(("stealthy_patchright", _stealthy_patchright_fetch))
@@ -264,10 +262,9 @@ class WebScraper:
         if availability.get("stealthy_camoufox") and tier in ("stealthy", "all"):
             async def _stealthy_camoufox_fetch(url: str, _timeout: float = timeout_s):
                 from scrapling.fetchers import StealthyFetcher
-                # StealthyFetcher with camoufox=True uses Camoufox Firefox binary
-                fetcher = StealthyFetcher(headless=True, camoufox=True)
-                return await asyncio.to_thread(
-                    fetcher.get, url, follow_redirects=True, timeout=_timeout
+                # StealthyFetcher.async_fetch with camoufox=True is natively async
+                return await StealthyFetcher.async_fetch(
+                    url, headless=True, camoufox=True, timeout=int(_timeout * 1000)
                 )
 
             chain.append(("stealthy_camoufox", _stealthy_camoufox_fetch))

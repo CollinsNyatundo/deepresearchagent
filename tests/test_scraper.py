@@ -339,8 +339,7 @@ async def test_dynamic_fetcher_live_js_site():
     """LIVE: DynamicFetcher (Playwright) fetches a JS-rendered page."""
     from scrapling.fetchers import DynamicFetcher
 
-    fetcher = DynamicFetcher(headless=True, disable_resources=True)
-    page = await asyncio.to_thread(fetcher.get, "https://example.com", follow_redirects=True)
+    page = await DynamicFetcher.async_fetch("https://example.com", headless=True, disable_resources=True)
 
     assert page is not None
     assert page.status == 200

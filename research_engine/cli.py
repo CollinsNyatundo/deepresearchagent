@@ -299,12 +299,12 @@ def setup_shims() -> None:
     """
     from research_engine.setup_shims import setup_shims as run_setup
 
-    console.print("[blue]Setting up shims/wrappers for GitNexus and ast-grep…[/blue]")
+    console.print("[blue]Setting up shims/wrappers for GitNexus and ast-grep...[/blue]")
     try:
         created, message = run_setup()
         for path in created:
-            console.print(f"  [green]✔[/green] Created: {path}")
-        console.print(f"\n[bold green]✅ {message}[/bold green]")
+            console.print(f"  [green]*[/green] Created: {path}")
+        console.print(f"\n[bold green]OK: {message}[/bold green]")
     except Exception as e:
         console.print(f"\n[bold red]Failed to setup shims: {e}[/bold red]")
         raise typer.Exit(code=1)
