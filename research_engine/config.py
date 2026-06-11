@@ -63,6 +63,9 @@ class SearchConfig(BaseModel):
     max_results: int = 10
     tavily_api_key: str = ""
     brave_api_key: str = ""
+    exa_api_key: str = ""
+    firecrawl_api_key: str = ""
+    parallel_api_key: str = ""
 
 
 class ScrapingConfig(BaseModel):
@@ -77,6 +80,8 @@ class ScrapingConfig(BaseModel):
     #   "stealthy" — async + Playwright + patchright + Camoufox Firefox (maximum bypass)
     #   "all"      — all tiers in order (recommended: auto-fallback from fast → stealthy)
     fetcher_tier: str = "all"
+    firecrawl_api_key: str = ""
+    parallel_api_key: str = ""
 
 
 class ResearchConfig(BaseModel):
@@ -178,6 +183,17 @@ def load_config(path: str | Path | None = None) -> AppConfig:
 
     if brave_key := os.environ.get("BRAVE_SEARCH_API_KEY"):
         env_overrides.setdefault("search", {})["brave_api_key"] = brave_key
+
+    if exa_key := os.environ.get("EXA_API_KEY"):
+        env_overrides.setdefault("search", {})["exa_api_key"] = exa_key
+
+    if firecrawl_key := os.environ.get("FIRECRAWL_API_KEY"):
+        env_overrides.setdefault("search", {})["firecrawl_api_key"] = firecrawl_key
+        env_overrides.setdefault("scraping", {})["firecrawl_api_key"] = firecrawl_key
+
+    if parallel_key := os.environ.get("PARALLEL_API_KEY"):
+        env_overrides.setdefault("search", {})["parallel_api_key"] = parallel_key
+        env_overrides.setdefault("scraping", {})["parallel_api_key"] = parallel_key
 
     if model := os.environ.get("OPENROUTER_MODEL"):
         env_overrides.setdefault("llm", {})["default_model"] = model

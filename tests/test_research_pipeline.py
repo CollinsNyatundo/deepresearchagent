@@ -371,12 +371,12 @@ class TestSearchProviderReporting:
 @pytest.mark.live
 async def test_live_search_and_scrape_pipeline():
     """LIVE: Full search→scrape pipeline — verifies non-zero content for a real query."""
-    from research_engine.sources.web_search import DuckDuckGoSearchProvider
+    from research_engine.sources.web_search import DuckDuckGoSearch
     from research_engine.sources.web_scraper import WebScraper
 
     # Search
-    search = DuckDuckGoSearchProvider(max_results=3)
-    results = await search.search("Python asyncio tutorial")
+    search = DuckDuckGoSearch()
+    results = await search.search("Python asyncio tutorial", max_results=3)
     assert len(results) >= 1, "Search must return at least 1 result"
 
     # Scrape first result

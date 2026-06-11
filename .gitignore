@@ -67,3 +67,6 @@ test_cypher2.json
 # Local Audit and Agent Metadata
 .agents/
 global_skills_catalog.md
+
+# Compound Engineering
+.compound-engineering/*.local.yaml

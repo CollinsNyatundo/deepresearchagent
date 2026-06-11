@@ -41,11 +41,75 @@ import asyncio
 import logging
 import re
 from urllib.parse import urlparse
+from typing import Any
+
+import httpx
 
 from research_engine.config import ScrapingConfig
 from research_engine.models import ScrapedPage
 
 logger = logging.getLogger(__name__)
+
+
+class MockResponse:
+    """Mock response object mimicking Scrapling's Response interface for API fetchers."""
+
+    def __init__(self, status: int, text: str, title: str = ""):
+        self.status = status
+        self.text_content = text
+        self.title_content = title
+
+    def get_all_text(self) -> str:
+        return self.text_content
+
+    def find(self, tag: str) -> Any:
+        if tag == "title":
+            class MockElement:
+                text = self.title_content
+            return MockElement()
+        return None
+
+
+def smart_crusher_compress(content: str, query: str) -> str:
+    """Query-guided sentence/paragraph level token compressor.
+
+    Computes semantic overlap of query words with each paragraph.
+    Keeps headings and paragraphs with overlap >= 0.2.
+    """
+    if not content or not query:
+        return content
+
+    # Normalize query terms
+    query_words = set(re.findall(r"\w+", query.lower()))
+    if not query_words:
+        return content
+
+    paragraphs = content.split("\n\n")
+    kept_paragraphs = []
+
+    for para in paragraphs:
+        para_clean = para.strip()
+        if not para_clean:
+            continue
+
+        # Tokenize paragraph words
+        para_words = set(re.findall(r"\w+", para_clean.lower()))
+        if not para_words:
+            continue
+
+        # Compute Jaccard overlap or simple intersection ratio
+        overlap = len(query_words.intersection(para_words)) / len(query_words)
+
+        # Keep if overlap ratio is >= 0.2, or if it's a heading
+        if overlap >= 0.2 or para_clean.startswith("#"):
+            kept_paragraphs.append(para_clean)
+
+    compressed = "\n\n".join(kept_paragraphs)
+    orig_len = len(content)
+    comp_len = len(compressed)
+    ratio = (1.0 - comp_len / orig_len) * 100 if orig_len > 0 else 0.0
+    logger.info(f"SmartCrusher compressed content from {orig_len} to {comp_len} chars ({ratio:.1f}% reduction)")
+    return compressed
 
 
 def _check_fetcher_availability() -> dict[str, bool]:
@@ -128,13 +192,27 @@ class WebScraper:
     def __init__(self, config: ScrapingConfig | None = None):
         self.config = config or ScrapingConfig()
 
-    async def fetch_page(self, url: str) -> ScrapedPage:
+    async def fetch_page(self, url: str, query: str | None = None, upgrade_context: bool = False) -> ScrapedPage:
         """Fetch a single page with automatic 4-tier fetcher fallback.
 
         Returns a ScrapedPage with extracted content or error details.
         """
+        # Rewrite arXiv PDF URLs to abstract pages for high-reliability scraping
+        if "arxiv.org/pdf/" in url:
+            rewritten_url = url.replace("arxiv.org/pdf/", "arxiv.org/abs/")
+            if rewritten_url.endswith(".pdf"):
+                rewritten_url = rewritten_url[:-4]
+            logger.info(f"Rewriting arXiv PDF URL {url} -> abstract page {rewritten_url}")
+            url = rewritten_url
+
         availability = get_fetcher_availability()
-        chain = self._build_fetcher_chain(availability)
+        chain = self._build_fetcher_chain(availability, upgrade_context=upgrade_context)
+
+        # Skip heavy browser fetchers for other PDFs to avoid slow browser failures
+        is_pdf = url.lower().split("?")[0].endswith(".pdf")
+        if is_pdf:
+            chain = [item for item in chain if item[0] in ("async_fetcher", "basic_fetcher", "firecrawl_scrape", "parallel_extract")]
+            logger.debug(f"Restricting fetchers to non-browser tiers for PDF URL: {url}")
 
         if not chain:
             logger.error("No Scrapling fetchers available! Check installation.")
@@ -145,19 +223,29 @@ class WebScraper:
             )
 
         last_error = ""
+        fallback_attempts: list[str] = []
+        original_status: int | None = None
+
         for fetcher_name, fetcher_fn in chain:
             try:
                 logger.debug(f"[{fetcher_name}] Trying {url}")
                 page = await fetcher_fn(url)
 
                 status = getattr(page, "status", None)
+                if original_status is None:
+                    original_status = status
+
+                fallback_attempts.append(f"{fetcher_name}: status {status}")
+
                 if page is not None and status == 200:
-                    scraped = self._extract_content(page, url, fetcher_name)
+                    scraped = self._extract_content(page, url, fetcher_name, query=query, upgrade_context=upgrade_context)
                     if scraped.content_length >= 50:
                         logger.info(
                             f"✓ [{fetcher_name}] Scraped {url} "
                             f"({scraped.content_length:,} chars)"
                         )
+                        scraped.original_status = original_status
+                        scraped.fallback_attempts = fallback_attempts
                         return scraped
                     else:
                         logger.warning(
@@ -174,10 +262,12 @@ class WebScraper:
             except ImportError as e:
                 logger.warning(f"[{fetcher_name}] Not available: {e}")
                 last_error = f"ImportError: {e}"
+                fallback_attempts.append(f"{fetcher_name}: ImportError")
                 continue
             except Exception as e:
                 logger.warning(f"[{fetcher_name}] Failed for {url}: {type(e).__name__}: {e}")
                 last_error = f"{type(e).__name__}: {e}"
+                fallback_attempts.append(f"{fetcher_name}: {type(e).__name__}: {e}")
                 continue
 
         logger.error(f"✗ All fetchers failed for {url}. Last error: {last_error}")
@@ -185,12 +275,16 @@ class WebScraper:
             url=url,
             success=False,
             error=f"All fetchers failed. Last: {last_error}",
+            original_status=original_status,
+            fallback_attempts=fallback_attempts,
         )
 
     async def fetch_pages(
         self,
         urls: list[str],
         max_concurrent: int | None = None,
+        query: str | None = None,
+        upgrade_context: bool = False,
     ) -> list[ScrapedPage]:
         """Fetch multiple pages concurrently with a semaphore limit."""
         concurrency = max_concurrent or self.config.max_concurrent
@@ -198,7 +292,7 @@ class WebScraper:
 
         async def _limited_fetch(url: str) -> ScrapedPage:
             async with semaphore:
-                return await self.fetch_page(url)
+                return await self.fetch_page(url, query=query, upgrade_context=upgrade_context)
 
         tasks = [_limited_fetch(url) for url in urls]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -214,7 +308,7 @@ class WebScraper:
         return pages
 
     def _build_fetcher_chain(
-        self, availability: dict[str, bool]
+        self, availability: dict[str, bool], upgrade_context: bool = False
     ) -> list[tuple[str, object]]:
         """Build the ordered fetcher chain based on tier config and availability.
 
@@ -223,6 +317,54 @@ class WebScraper:
         chain: list[tuple[str, object]] = []
         tier = self.config.fetcher_tier.lower()
         timeout_s = self.config.timeout_ms / 1000
+
+        # ── Tier 0a: Parallel AI Extract (if API key available) ─────────────────
+        if self.config.parallel_api_key:
+            async def _parallel_fetch(url: str, _timeout: float = timeout_s):
+                headers = {
+                    "Authorization": f"Bearer {self.config.parallel_api_key}",
+                    "Content-Type": "application/json"
+                }
+                payload = {"url": url}
+                async with httpx.AsyncClient(timeout=_timeout) as client:
+                    resp = await client.post(
+                        "https://api.parallel.ai/v1/extract",
+                        json=payload,
+                        headers=headers
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                content = data.get("text", "") or data.get("content", "") or data.get("extracted_content", "")
+                title = data.get("title", "")
+                return MockResponse(status=200, text=content, title=title)
+
+            chain.append(("parallel_extract", _parallel_fetch))
+
+        # ── Tier 0b: Firecrawl Scrape (if API key available) ────────────────────
+        if self.config.firecrawl_api_key:
+            async def _firecrawl_fetch(url: str, _timeout: float = timeout_s):
+                headers = {
+                    "Authorization": f"Bearer {self.config.firecrawl_api_key}",
+                    "Content-Type": "application/json"
+                }
+                payload = {
+                    "url": url,
+                    "formats": ["markdown"],
+                    "onlyMainContent": not upgrade_context
+                }
+                async with httpx.AsyncClient(timeout=_timeout) as client:
+                    resp = await client.post(
+                        "https://api.firecrawl.dev/v1/scrape",
+                        json=payload,
+                        headers=headers
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                content = data.get("data", {}).get("markdown", "")
+                title = data.get("data", {}).get("metadata", {}).get("title", "")
+                return MockResponse(status=200, text=content, title=title)
+
+            chain.append(("firecrawl_scrape", _firecrawl_fetch))
 
         # ── Tier 1: AsyncFetcher (curl_cffi, natively async) ─────────────────
         # Always included unless tier is explicitly "stealthy_only"
@@ -240,10 +382,9 @@ class WebScraper:
         if availability.get("dynamic") and tier in ("dynamic", "stealthy", "all"):
             async def _dynamic_fetch(url: str, _timeout: float = timeout_s):
                 from scrapling.fetchers import DynamicFetcher
-                # DynamicFetcher.get() is sync — wrap in to_thread
-                fetcher = DynamicFetcher(headless=True, disable_resources=True)
-                return await asyncio.to_thread(
-                    fetcher.get, url, follow_redirects=True, timeout=_timeout
+                # DynamicFetcher.async_fetch is natively async
+                return await DynamicFetcher.async_fetch(
+                    url, headless=True, disable_resources=True, timeout=int(_timeout * 1000)
                 )
 
             chain.append(("dynamic_fetcher", _dynamic_fetch))
@@ -252,10 +393,9 @@ class WebScraper:
         if availability.get("stealthy_patchright") and tier in ("stealthy", "all"):
             async def _stealthy_patchright_fetch(url: str, _timeout: float = timeout_s):
                 from scrapling.fetchers import StealthyFetcher
-                # StealthyFetcher.get() is sync — wrap in to_thread
-                fetcher = StealthyFetcher(headless=True)
-                return await asyncio.to_thread(
-                    fetcher.get, url, follow_redirects=True, timeout=_timeout
+                # StealthyFetcher.async_fetch is natively async
+                return await StealthyFetcher.async_fetch(
+                    url, headless=True, timeout=int(_timeout * 1000)
                 )
 
             chain.append(("stealthy_patchright", _stealthy_patchright_fetch))
@@ -264,10 +404,9 @@ class WebScraper:
         if availability.get("stealthy_camoufox") and tier in ("stealthy", "all"):
             async def _stealthy_camoufox_fetch(url: str, _timeout: float = timeout_s):
                 from scrapling.fetchers import StealthyFetcher
-                # StealthyFetcher with camoufox=True uses Camoufox Firefox binary
-                fetcher = StealthyFetcher(headless=True, camoufox=True)
-                return await asyncio.to_thread(
-                    fetcher.get, url, follow_redirects=True, timeout=_timeout
+                # StealthyFetcher.async_fetch with camoufox=True is natively async
+                return await StealthyFetcher.async_fetch(
+                    url, headless=True, camoufox=True, timeout=int(_timeout * 1000)
                 )
 
             chain.append(("stealthy_camoufox", _stealthy_camoufox_fetch))
@@ -287,7 +426,7 @@ class WebScraper:
 
         return chain
 
-    def _extract_content(self, page, url: str, fetcher_name: str) -> ScrapedPage:
+    def _extract_content(self, page, url: str, fetcher_name: str, query: str | None = None, upgrade_context: bool = False) -> ScrapedPage:
         """Extract text content from a Scrapling v0.4.5 Response object.
 
         Scrapling v0.4.5 API (verified):
@@ -335,7 +474,9 @@ class WebScraper:
 
         # ── Clean and truncate ─────────────────────────────────────────────
         content = _clean_content(content)
-        max_chars = self.config.max_content_chars
+        if query and not upgrade_context:
+            content = smart_crusher_compress(content, query)
+        max_chars = self.config.max_content_chars if not upgrade_context else self.config.max_content_chars * 5
         if len(content) > max_chars:
             content = content[:max_chars] + "\n\n[... content truncated ...]"
 

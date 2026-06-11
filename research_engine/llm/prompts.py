@@ -304,3 +304,50 @@ Return JSON:
 }}
 """
 
+QUERY_INTENT_CLASSIFICATION_TEMPLATE = """\
+You are a research intent classifier. Analyze the user's research topic and classify its category and requirements.
+
+Research Topic: {topic}
+
+Classify into one of these categories:
+- academic: Scientific papers, research publications, highly technical medical or physics theories, patents.
+- news: Current events, stock updates, political news, product launches, trending affairs.
+- technical: Software libraries, code specifications, technical documentation, developer tools.
+- general: General business topics, historical events, travel, lifestyle, general facts.
+
+Based on the topic, suggest:
+1. Category (academic, news, technical, general).
+2. Rationale for this classification.
+3. List of target domains to prioritize (e.g. ["arxiv.org", "ncbi.nlm.nih.gov"] for academic, ["github.com", "readthedocs.io"] for technical).
+4. List of domains to avoid (e.g. spam sites, generic forums like Reddit if academic).
+5. Optional list of custom plan steps (e.g. custom research phases).
+6. Optional list of custom initial sub-queries.
+
+Return JSON matching this schema:
+{{
+  "category": "academic",
+  "rationale": "Reasoning here...",
+  "target_domains": ["arxiv.org", "ncbi.nlm.nih.gov"],
+  "avoid_domains": ["quora.com", "pinterest.com"],
+  "steps_override": ["Step 1", "Step 2", ...],
+  "sub_queries": ["sub query 1", "sub query 2"]
+}}
+"""
+
+POINTWISE_RELEVANCE_EVALUATION_TEMPLATE = """\
+You are an expert information relevance assessor. Rate the relevance of this search result snippet against the target sub-query.
+
+Target Sub-query: {sub_query}
+SearchResult Snippet: {snippet}
+
+Evaluate if the search snippet contains useful, relevant, and credible context that answers the sub-query.
+Rate your confidence/relevance score:
+- score: 0.0 (completely irrelevant, spam, or ad) to 1.0 (highly relevant, directly answers query, high-signal content).
+- score must be between 0.0 and 1.0.
+
+Return JSON:
+{{
+  "score": 0.85,
+  "rationale": "Explain briefly why the snippet is relevant or irrelevant"
+}}
+"""

@@ -45,6 +45,7 @@ async def build_knowledge_graph(
     result: ResearchResult,
     run_dir: Path,
     graphify_mode: str = "deep",
+    llm: LLMProvider | None = None,
 ) -> KnowledgeGraph:
     """Build a knowledge graph from a completed research result.
 
@@ -55,6 +56,7 @@ async def build_knowledge_graph(
         result: The completed research result.
         run_dir: The run output directory (e.g. outputs/{run_id}/).
         graphify_mode: 'fast' (AST only) or 'deep' (AST + LLM-inferred).
+        llm: Optional LLMProvider for in-process extraction.
 
     Returns:
         KnowledgeGraph with nodes, edges, communities, god nodes, surprises.
@@ -63,7 +65,7 @@ async def build_knowledge_graph(
 
     # Check if graphify is available
     if not _graphify_available():
-        logger.warning("graphify CLI not found — falling back to lightweight graph builder")
+        logger.warning("graphify library not found — falling back to lightweight graph builder")
         return await _build_lightweight_graph(result, run_dir)
 
     with tempfile.TemporaryDirectory(prefix="dra_graphify_") as tmp_str:
@@ -71,7 +73,7 @@ async def build_knowledge_graph(
         await _export_corpus(result, corpus_dir)
 
         graphify_out = Path(tmp_str) / "graphify-out"
-        success = await _run_graphify(corpus_dir, graphify_out, mode=graphify_mode)
+        success = await _run_graphify(corpus_dir, graphify_out, result, mode=graphify_mode, llm=llm)
 
         if not success:
             logger.warning("graphify subprocess failed — falling back to lightweight graph")
@@ -173,48 +175,262 @@ async def _export_corpus(result: ResearchResult, corpus_dir: Path) -> None:
 async def _run_graphify(
     corpus_dir: Path,
     output_dir: Path,
+    result: ResearchResult,
     mode: str = "deep",
+    llm: LLMProvider | None = None,
 ) -> bool:
-    """Run the graphify CLI as an async subprocess.
+    """Run the graphify build pipeline in-process using python APIs.
 
     Returns True if successful, False on failure.
     """
-    args = [
-        sys.executable, "-m", "graphify",
-        str(corpus_dir),
-        "--output", str(output_dir),
-    ]
-    if mode == "deep":
-        args += ["--mode", "deep"]
-
-    logger.info(f"Running: {' '.join(args)}")
-
+    logger.info(f"Running graphify build pipeline in-process for corpus: {corpus_dir}")
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        from graphify.build import build_from_json
+        from graphify.cluster import cluster, score_all
+        from graphify.analyze import god_nodes, surprising_connections, suggest_questions
+        from graphify.report import generate
+        from graphify.export import to_json, to_html
+        from graphify.detect import detect, save_manifest
+        from pydantic import BaseModel, Field
+        from typing import List
+
+        if llm is None:
+            from research_engine.llm.provider import LLMProvider
+            from research_engine.config import get_config
+            cfg = get_config()
+            llm = LLMProvider(config=cfg.llm)
+
+        # 1. Run detection
+        detection = detect(corpus_dir)
+        
+        # 2. Concept extraction using LLM
+        extraction = {
+            "nodes": [],
+            "edges": [],
+            "hyperedges": [],
+            "input_tokens": 0,
+            "output_tokens": 0,
+        }
+
+        # Add root node representing the core research query
+        root_id = "root"
+        extraction["nodes"].append({
+            "id": root_id,
+            "label": result.query[:80],
+            "file_type": "document",
+            "source_file": "meta/plan.md",
+            "source_location": "L1",
+            "summary": f"Core research query: {result.query}",
+        })
+
+        # Add cycle nodes and citation nodes
+        for i, step in enumerate(result.steps):
+            cycle_id = f"cycle_{i+1}"
+            extraction["nodes"].append({
+                "id": cycle_id,
+                "label": f"Cycle {i+1}: {step.query.query}",
+                "file_type": "document",
+                "source_file": f"findings/cycle_{i+1:02d}.md",
+                "source_location": "L1",
+                "summary": f"Answer: {step.answer.answer[:200]}...",
+            })
+            extraction["edges"].append({
+                "source": root_id,
+                "target": cycle_id,
+                "relation": "has_step",
+                "confidence": "EXTRACTED",
+                "confidence_score": 1.0,
+                "source_file": "meta/plan.md",
+                "source_location": "L1",
+                "weight": 1.0,
+            })
+
+            # Citations
+            for cit in step.answer.citations:
+                cit_id = f"cit_{cit.id}"
+                if not any(n["id"] == cit_id for n in extraction["nodes"]):
+                    extraction["nodes"].append({
+                        "id": cit_id,
+                        "label": cit.title or cit.domain or cit.url,
+                        "file_type": "paper" if "arxiv.org" in cit.url or cit.url.lower().endswith(".pdf") else "document",
+                        "source_file": f"findings/cycle_{i+1:02d}.md",
+                        "source_location": "Sources",
+                        "summary": cit.snippet or f"Source URL: {cit.url}",
+                        "file_path": cit.url,
+                    })
+                extraction["edges"].append({
+                    "source": cycle_id,
+                    "target": cit_id,
+                    "relation": "references",
+                    "confidence": "EXTRACTED",
+                    "confidence_score": 1.0,
+                    "source_file": f"findings/cycle_{i+1:02d}.md",
+                    "source_location": "Sources",
+                    "weight": 1.0,
+                })
+
+        # Define extraction schema
+        class ExtractedNode(BaseModel):
+            id: str = Field(description="Unique snake_case identifier (e.g. quantum_computing)")
+            label: str = Field(description="Human readable name of the concept or entity")
+            type: str = Field(description="Type: concept, technology, methodology, organization, person")
+            summary: str = Field(description="1-2 sentence description of the concept")
+
+        class ExtractedEdge(BaseModel):
+            source: str = Field(description="ID of the source node")
+            target: str = Field(description="ID of the target node")
+            relation: str = Field(description="Relation type: e.g. references, implements, part_of, depends_on, conceptually_related_to")
+            confidence: str = Field(description="EXTRACTED or INFERRED")
+            confidence_score: float = Field(description="Score between 0.1 and 1.0")
+
+        class GraphFragment(BaseModel):
+            nodes: List[ExtractedNode]
+            edges: List[ExtractedEdge]
+
+        async def _extract_fragment(content: str, src_file: str, parent_id: str) -> dict:
+            if not content or len(content.strip()) < 100:
+                return {"nodes": [], "edges": []}
+
+            prompt = f"""You are a Graphify extraction agent. Analyze the following research text and extract key concepts, entities (technologies, methodologies, papers), and their relationships to form a knowledge graph fragment.
+
+Research Text:
+\"\"\"{content}\"\"\"
+
+Output valid JSON matching this schema:
+{{
+  "nodes": [
+    {{
+      "id": "snake_case_id",
+      "label": "Human Readable Label",
+      "type": "concept|technology|methodology|organization|person",
+      "summary": "1-2 sentence description"
+    }}
+  ],
+  "edges": [
+    {{
+      "source": "source_node_id",
+      "target": "target_node_id",
+      "relation": "references|implements|part_of|depends_on|conceptually_related_to",
+      "confidence": "EXTRACTED|INFERRED",
+      "confidence_score": 0.8
+    }}
+  ]
+}}
+"""
+            try:
+                input_tokens = len(prompt.split()) // 3 + 200
+                res = await llm.call_structured(prompt, GraphFragment)
+                output_tokens = len(str(res).split()) // 3 + 50
+                return {
+                    "nodes": res.get("nodes", []),
+                    "edges": res.get("edges", []),
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "parent_id": parent_id,
+                    "source_file": src_file
+                }
+            except Exception as e:
+                logger.warning(f"In-process concept extraction failed for {src_file}: {e}")
+                return {"nodes": [], "edges": [], "input_tokens": 0, "output_tokens": 0, "parent_id": parent_id, "source_file": src_file}
+
+        # Build tasks
+        tasks = []
+        # Add final report
+        tasks.append(_extract_fragment(result.report, "meta/final_report.md", root_id))
+        # Add cycle answers
+        for i, step in enumerate(result.steps):
+            tasks.append(_extract_fragment(step.answer.answer, f"findings/cycle_{i+1:02d}.md", f"cycle_{i+1}"))
+
+        fragments = await asyncio.gather(*tasks, return_exceptions=True)
+
+        seen_nodes = {n["id"] for n in extraction["nodes"]}
+        input_tokens = 0
+        output_tokens = 0
+
+        for frag in fragments:
+            if isinstance(frag, Exception) or not frag:
+                continue
+            input_tokens += frag.get("input_tokens", 0)
+            output_tokens += frag.get("output_tokens", 0)
+            src_file = frag.get("source_file", "document")
+            parent_id = frag.get("parent_id", root_id)
+
+            for node in frag.get("nodes", []):
+                nid = node["id"]
+                if nid not in seen_nodes:
+                    seen_nodes.add(nid)
+                    extraction["nodes"].append({
+                        "id": nid,
+                        "label": node["label"],
+                        "file_type": "document",
+                        "source_file": src_file,
+                        "source_location": "L1",
+                        "summary": node["summary"],
+                    })
+                # Link cycle/root to this concept
+                extraction["edges"].append({
+                    "source": parent_id,
+                    "target": nid,
+                    "relation": "contains_concept",
+                    "confidence": "INFERRED",
+                    "confidence_score": 0.8,
+                    "source_file": src_file,
+                    "source_location": "L1",
+                    "weight": 1.0,
+                })
+
+            for edge in frag.get("edges", []):
+                src, tgt = edge["source"], edge["target"]
+                if src in seen_nodes and tgt in seen_nodes:
+                    extraction["edges"].append({
+                        "source": src,
+                        "target": tgt,
+                        "relation": edge["relation"],
+                        "confidence": edge["confidence"],
+                        "confidence_score": edge.get("confidence_score", 0.8),
+                        "source_file": src_file,
+                        "source_location": "L1",
+                        "weight": 1.0,
+                    })
+
+        # 3. Build graph & cluster
+        G = build_from_json(extraction)
+        communities = cluster(G)
+        cohesion = score_all(G, communities)
+        gods = god_nodes(G)
+        surprises = surprising_connections(G, communities)
+
+        # 4. Community labeling
+        labels = {}
+        for cid, node_ids in communities.items():
+            comm_nodes = [n for n in extraction["nodes"] if n["id"] in node_ids]
+            keywords = [n["label"] for n in comm_nodes if n["id"] not in ("root",) and not n["id"].startswith("cycle_")][:3]
+            labels[cid] = " & ".join(keywords) if keywords else f"Community {cid}"
+
+        questions = suggest_questions(G, communities, labels)
+
+        # 5. Report generation
+        tokens = {"input": input_tokens, "output": output_tokens}
+        report = generate(
+            G, communities, cohesion, labels, gods, surprises,
+            detection, tokens, str(corpus_dir),
+            suggested_questions=questions
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
 
-        if proc.returncode != 0:
-            logger.error(
-                f"graphify failed (exit {proc.returncode}):\n"
-                f"stdout: {stdout.decode()[:500]}\n"
-                f"stderr: {stderr.decode()[:500]}"
-            )
-            return False
+        # 6. Save outputs
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "GRAPH_REPORT.md").write_text(report, encoding="utf-8")
+        to_json(G, communities, str(output_dir / "graph.json"))
+        to_html(G, communities, str(output_dir / "graph.html"), community_labels=labels)
 
-        logger.debug(f"graphify stdout: {stdout.decode()[:200]}")
+        # Save manifest
+        save_manifest(detection["files"], str(output_dir / "manifest.json"))
+
+        logger.info(f"Successfully generated in-process knowledge graph for {corpus_dir}")
         return True
 
-    except asyncio.TimeoutError:
-        logger.error("graphify timed out (>5 min)")
-        if "proc" in locals():
-            proc.kill()
-        return False
     except Exception as e:
-        logger.error(f"graphify subprocess error: {e}")
+        logger.error(f"In-process graphify execution failed: {e}", exc_info=True)
         return False
 
 

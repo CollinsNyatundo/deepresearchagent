@@ -20,7 +20,7 @@ import asyncio
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import aiohttp
@@ -214,7 +214,7 @@ async def build_gitnexus_graph(repo_name: str) -> KnowledgeGraph:
         raw_id = row.get("id", "").strip()
         name = row.get("name", "").strip()
         label = row.get("label", "").strip()
-        file_path = row.get("filePath", "").strip()
+        file_path = normalize_to_posix_relative(row.get("filePath", "").strip(), repo_name)
 
         if not raw_id or not name:
             continue
@@ -306,7 +306,7 @@ async def build_gitnexus_graph(repo_name: str) -> KnowledgeGraph:
         communities=communities,
         god_nodes=list(god_node_ids),
         surprise_edges=surprise_edges,
-        built_at=datetime.now(timezone.utc),
+        built_at=datetime.now(UTC),
         graphify_version=f"gitnexus-bridge-1.1/{repo_name}",
     )
 
@@ -351,12 +351,52 @@ def cache_age_seconds(repo_name: str) -> float | None:
     path = graph_output_path(repo_name)
     if not path.exists():
         return None
-    return (datetime.now(timezone.utc) - datetime.fromtimestamp(
-        path.stat().st_mtime, tz=timezone.utc
+    return (datetime.now(UTC) - datetime.fromtimestamp(
+        path.stat().st_mtime, tz=UTC
     )).total_seconds()
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
+
+def normalize_to_posix_relative(path_str: str, repo_name: str) -> str:
+    """Normalize a path to a POSIX-style relative path from repo root.
+
+    Converts backslashes to forward slashes. If the path is absolute,
+    attempts to make it relative to the current working directory, or
+    extract the part after the repo_name directory.
+    """
+    if not path_str:
+        return ""
+
+    # Replace all backslashes with forward slashes
+    p = path_str.replace("\\", "/")
+
+    # Try resolving relative to CWD if it starts with a drive letter or leading slash
+    is_absolute = False
+    if len(p) > 1 and p[1] == ":":  # e.g., C:/path
+        is_absolute = True
+    elif p.startswith("/"):
+        is_absolute = True
+
+    if is_absolute:
+        try:
+            cwd_posix = Path.cwd().as_posix()
+            if p.lower().startswith(cwd_posix.lower()):
+                p = p[len(cwd_posix):].lstrip("/")
+        except Exception:
+            pass
+
+    # As a fallback or general rule, if the repo_name is in the path,
+    # strip everything up to and including repo_name/
+    if repo_name:
+        repo_prefix = f"/{repo_name}/"
+        if repo_prefix.lower() in p.lower():
+            idx = p.lower().rfind(repo_prefix.lower())
+            p = p[idx + len(repo_prefix):]
+        elif p.lower().startswith(f"{repo_name.lower()}/"):
+            p = p[len(repo_name) + 1:]
+
+    return p
 
 def _map_node_type(label: str) -> str:
     """Map a GitNexus label to a Graphify node type."""

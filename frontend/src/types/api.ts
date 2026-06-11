@@ -58,6 +58,7 @@ export type ResearchRequest = {
 
 export type ResearchState =
   | 'initializing'
+  | 'classifying_intent'
   | 'planning'
   | 'plan_ready'
   | 'decomposing'
@@ -214,4 +215,29 @@ export type KGAvailability = {
   knowledge_graph_available: boolean;
   graph_html_available: boolean;
 };
+
+export type OpenFileRequest = {
+  path: string;
+};
+
+
+// ─── Phase 1 Architectural Types ────────────────────────────────────
+
+export type QueryIntentCategory = 'academic' | 'news' | 'technical' | 'general';
+
+export type QueryIntent = {
+  category: QueryIntentCategory;
+  rationale: string;
+  target_domains: string[];
+  avoid_domains: string[];
+  steps_override?: string[];
+  sub_queries?: string[];
+};
+
+export type RelevanceEvaluation = {
+  score: number;
+  rationale: string;
+};
+
+
 

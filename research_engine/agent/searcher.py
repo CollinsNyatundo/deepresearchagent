@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -18,6 +19,8 @@ from research_engine.models import (
     SearchAnswer,
     SearchQuery,
     SearchResult,
+    QueryIntent,
+    RelevanceEvaluation,
 )
 from research_engine.sources.web_scraper import WebScraper
 from research_engine.sources.web_search import SearchProvider
@@ -52,12 +55,41 @@ async def generate_query(
         return SearchQuery(query=topic, rationale="Fallback: using topic as query")
 
 
+async def _evaluate_relevance(
+    result: SearchResult,
+    sub_query: str,
+    llm: LLMProvider,
+    model: str | None = None,
+    provider: str | None = None,
+) -> tuple[SearchResult, float, str]:
+    """Pointwise relevance check for a single SearchResult snippet."""
+    from research_engine.llm.prompts import POINTWISE_RELEVANCE_EVALUATION_TEMPLATE
+    from research_engine.models import RelevanceEvaluation
+
+    prompt = POINTWISE_RELEVANCE_EVALUATION_TEMPLATE.format(
+        sub_query=sub_query,
+        snippet=result.snippet,
+    )
+    try:
+        res = await llm.call_structured(prompt, RelevanceEvaluation, model=model, provider=provider)
+        eval_res = RelevanceEvaluation(**res)
+        return result, eval_res.score, eval_res.rationale
+    except Exception as e:
+        logger.warning(f"Relevance evaluation failed for {result.url}: {e}. Defaulting to 1.0.")
+        return result, 1.0, f"Evaluation fallback due to error: {e}"
+
+
 async def search_and_scrape(
     query: SearchQuery,
     *,
     search_provider: SearchProvider,
     scraper: WebScraper,
     max_pages: int = 5,
+    intent: QueryIntent | None = None,
+    llm: LLMProvider | None = None,
+    model: str | None = None,
+    provider: str | None = None,
+    upgrade_context: bool = False,
 ) -> tuple[list[SearchResult], list[ScrapedPage]]:
     """Execute search → get URLs → deep scrape top pages with Scrapling.
 
@@ -70,23 +102,72 @@ async def search_and_scrape(
         search_provider: The search engine to use.
         scraper: The Scrapling-based web scraper.
         max_pages: Maximum number of pages to scrape.
+        intent: Optional query intent classification for domain filtering.
+        llm: Optional LLM provider for pointwise AutoEval relevance checking.
+        model: Optional model override.
+        provider: Optional LLM provider override.
+        upgrade_context: Optional flag to request denser search parameters and disable SmartCrusher.
 
     Returns:
         Tuple of (search_results, scraped_pages).
     """
     # Step 1: Search for URLs
-    search_results = await search_provider.search(query.query, max_results=max_pages * 2)
+    search_results = await search_provider.search(query.query, max_results=max_pages * 2, upgrade_context=upgrade_context)
     logger.info(f"Search returned {len(search_results)} results for: {query.query}")
 
     if not search_results:
         return [], []
 
-    # Step 2: Take top URLs and scrape full content via Scrapling
-    top_urls = [r.url for r in search_results[:max_pages] if r.url]
+    # Apply intent-based domain filtering & prioritization
+    if intent:
+        filtered_results = []
+        for r in search_results:
+            domain = urlparse(r.url).netloc.lower()
+            if any(avoid.lower() in domain for avoid in intent.avoid_domains if avoid):
+                logger.info(f"AutoEval Filter: Skipping avoided domain URL: {r.url}")
+                continue
+            filtered_results.append(r)
+
+        prioritized_results = []
+        other_results = []
+        for r in filtered_results:
+            domain = urlparse(r.url).netloc.lower()
+            if any(target.lower() in domain for target in intent.target_domains if target):
+                logger.info(f"AutoEval Filter: Prioritizing target domain URL: {r.url}")
+                prioritized_results.append(r)
+            else:
+                other_results.append(r)
+        search_results = prioritized_results + other_results
+
+    # Step 2: Pointwise relevance filter (AutoEval)
+    if llm and search_results:
+        logger.info(f"Running pointwise relevance AutoEval on {len(search_results)} search results...")
+        tasks = [
+            _evaluate_relevance(r, query.query, llm, model=model, provider=provider)
+            for r in search_results
+        ]
+        eval_results = await asyncio.gather(*tasks)
+        
+        # Attach scores to SearchResult models
+        for r, score, rationale in eval_results:
+            r.relevance_score = score
+            r.eval_rationale = rationale
+            
+        passed_results = [r for r, score, _ in eval_results if score >= 0.7]
+        logger.info(f"Relevance AutoEval: {len(passed_results)}/{len(search_results)} passed threshold (>=0.7)")
+    else:
+        passed_results = search_results
+
+    if not passed_results:
+        logger.warning("All search results filtered out by relevance AutoEval!")
+        return search_results, []
+
+    # Step 3: Take top URLs and scrape full content via Scrapling
+    top_urls = [r.url for r in passed_results[:max_pages] if r.url]
     top_urls = _deduplicate_urls(top_urls)
 
     logger.info(f"Scraping {len(top_urls)} pages with Scrapling...")
-    scraped_pages = await scraper.fetch_pages(top_urls)
+    scraped_pages = await scraper.fetch_pages(top_urls, query=query.query, upgrade_context=upgrade_context)
 
     # Filter to successful scrapes
     successful = [p for p in scraped_pages if p.success and p.content]
