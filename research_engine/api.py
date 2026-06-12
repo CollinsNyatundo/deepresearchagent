@@ -54,7 +54,10 @@ from research_engine.models import (
     PlanApproval,
     PlanPreview,
     ResearchRequest,
+    ResearchResult,
     RunSummary,
+    TelemetryResponse,
+    ResynthesizeRequest,
 )
 from research_engine.output.storage import (
     graph_html_available,
@@ -80,10 +83,8 @@ config = get_config()
 @asynccontextmanager
 async def _lifespan(app: FastAPI):  # noqa: ARG001
     """Application lifespan — startup / shutdown hooks."""
-    # NOTE: gitnexus_scheduler was removed to eliminate LadybugDB lock
-    # contention between `gitnexus serve` (Web UI) and background
-    # `npx gitnexus analyze` tasks.  The official GitNexus Web UI now
-    # handles all codebase topology via the /gitnexus/serve/* endpoints.
+    from pathlib import Path
+    Path("outputs").mkdir(parents=True, exist_ok=True)
     yield
 
 
@@ -136,14 +137,23 @@ async def refresh_scraper_cache():
 @app.get("/runs", response_model=list[RunSummary])
 async def get_runs():
     """List all past research runs, newest first."""
-    return list_runs()
+    return await asyncio.to_thread(list_runs)
+
+
+@app.get("/runs/{run_id}", response_model=ResearchResult)
+async def get_run_details(run_id: str):
+    """Retrieve the full ResearchResult details for a run."""
+    try:
+        return await asyncio.to_thread(load_run, run_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
 
 
 @app.get("/runs/{run_id}/report")
 async def get_report(run_id: str):
     """Get the Markdown report for a research run."""
     try:
-        report = load_report(run_id)
+        report = await asyncio.to_thread(load_report, run_id)
         return {"content": report}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
@@ -153,7 +163,7 @@ async def get_report(run_id: str):
 async def get_mindmap(run_id: str):
     """Get the mindmap graph (G6 format) for a research run."""
     try:
-        return load_mindmap(run_id)
+        return await asyncio.to_thread(load_mindmap, run_id)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Mindmap not found for run: {run_id}")
 
@@ -399,7 +409,7 @@ async def expand_mindmap_node(run_id: str, request: ExpandRequest):
     from research_engine.output.mindmap import expand_node as do_expand
 
     try:
-        mindmap = load_mindmap(run_id)
+        mindmap = await asyncio.to_thread(load_mindmap, run_id)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Mindmap not found for run: {run_id}")
 
@@ -413,7 +423,7 @@ async def expand_mindmap_node(run_id: str, request: ExpandRequest):
 
     # Get research context for informed expansion
     try:
-        result = load_run(run_id)
+        result = await asyncio.to_thread(load_run, run_id)
         context = result.report[:5000]  # Use report as context
     except FileNotFoundError:
         context = f"Research about: {node.label}"
@@ -433,7 +443,7 @@ async def expand_mindmap_node(run_id: str, request: ExpandRequest):
     if expansion.new_nodes:
         mindmap.nodes.extend(expansion.new_nodes)
         mindmap.edges.extend(expansion.new_edges)
-        save_mindmap(mindmap, run_id)
+        await asyncio.to_thread(save_mindmap, mindmap, run_id)
 
     return expansion
 
@@ -592,13 +602,13 @@ async def get_knowledge_graph(run_id: str):
     Returns the full node/edge/community data for frontend rendering.
     Raises 404 if the graph has not been built yet.
     """
-    if not knowledge_graph_available(run_id):
+    if not await asyncio.to_thread(knowledge_graph_available, run_id):
         raise HTTPException(
             status_code=404,
             detail="Knowledge graph not built for this run. Try POST /runs/{run_id}/knowledge-graph/build",
         )
     try:
-        return load_knowledge_graph(run_id)
+        return await asyncio.to_thread(load_knowledge_graph, run_id)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -636,7 +646,7 @@ async def build_knowledge_graph(run_id: str):
     from research_engine.output.storage import DEFAULT_OUTPUT_DIR
 
     try:
-        result = load_run(run_id)
+        result = await asyncio.to_thread(load_run, run_id)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -938,3 +948,234 @@ async def open_file(request: OpenFileRequest):
             status_code=500,
             detail=f"Failed to open file: {str(e)}"
         )
+
+
+# ─── Telemetry Statistics ──────────────────────────────────────────────
+
+@app.get("/api/telemetry", response_model=TelemetryResponse)
+async def get_telemetry():
+    """Retrieve database cache statistics and active circuit breakers."""
+    import sqlite3
+    from research_engine.sources.circuit_breaker import CircuitBreakerManager
+
+    db_path = "outputs/cache.db"
+    
+    total_cached_queries = 0
+    total_scraped_pages = 0
+    scraper_success_rate = 100.0
+    
+    try:
+        def _fetch_cache_metrics():
+            import os
+            if not os.path.exists(db_path):
+                return 0, 0, 100.0
+            
+            with sqlite3.connect(db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Check tables
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='query_cache'")
+                has_query_cache = cursor.fetchone() is not None
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='page_cache'")
+                has_page_cache = cursor.fetchone() is not None
+                
+                q_count = 0
+                p_count = 0
+                success_count = 0
+                
+                if has_query_cache:
+                    cursor.execute("SELECT COUNT(*) FROM query_cache")
+                    q_count = cursor.fetchone()[0]
+                    
+                if has_page_cache:
+                    cursor.execute("SELECT content_json FROM page_cache")
+                    rows = cursor.fetchall()
+                    p_count = len(rows)
+                    for row in rows:
+                        try:
+                            data = json.loads(row[0])
+                            if data.get("success", False):
+                                success_count += 1
+                        except Exception:
+                            pass
+                            
+                rate = (success_count / p_count * 100) if p_count > 0 else 100.0
+                return q_count, p_count, round(rate, 2)
+                
+        total_cached_queries, total_scraped_pages, scraper_success_rate = await asyncio.to_thread(_fetch_cache_metrics)
+    except Exception as e:
+        logger.warning(f"Error reading cache metrics for telemetry: {e}")
+
+    active_circuit_breakers = []
+    for domain, state in CircuitBreakerManager._shared_domains.items():
+        if state.get("state") == "OPEN":
+            active_circuit_breakers.append(domain)
+            
+    return {
+        "total_cached_queries": total_cached_queries,
+        "total_scraped_pages": total_scraped_pages,
+        "active_circuit_breakers": active_circuit_breakers,
+        "scraper_success_rate": scraper_success_rate,
+    }
+
+
+async def run_resynthesis_task(
+    run_id: str,
+    disabled_domains: list[str],
+    model: str | None,
+    provider: str | None,
+    event_queue: asyncio.Queue,
+):
+    try:
+        from urllib.parse import urlparse
+        from datetime import UTC, datetime
+        from research_engine.agent.orchestrator import DeepResearchOrchestrator
+        from research_engine.agent.context import ResearchContext
+        from research_engine.output.storage import load_run, save_run, save_knowledge_graph
+        from research_engine.output.mindmap import build_mindmap_graph
+        from research_engine.knowledge_graph import builder as kg_builder
+
+        # 1. Load run
+        result = await asyncio.to_thread(load_run, run_id)
+
+        # 2. Filter domains
+        def is_domain_disabled(url: str) -> bool:
+            if not url:
+                return False
+            parsed = urlparse(url)
+            domain = (parsed.netloc or "").lower()
+            for d in disabled_domains:
+                d_lower = d.lower()
+                if domain == d_lower or domain.endswith("." + d_lower):
+                    return True
+            return False
+
+        # Create new context and populate with filtered steps/results
+        context = ResearchContext()
+        for step in result.steps:
+            step.scraped_pages = [p for p in step.scraped_pages if not is_domain_disabled(p.url)]
+            step.search_results = [r for r in step.search_results if not is_domain_disabled(r.url)]
+            step.answer.citations = [c for c in step.answer.citations if not is_domain_disabled(c.url)]
+            
+            await context.add_step(step)
+            await context.add_qa(step.query.query, step.answer.answer)
+
+        # 3. Generate new report
+        orchestrator = DeepResearchOrchestrator(config)
+        resolved_model = orchestrator._resolve_model(model, provider=provider)
+
+        await orchestrator._emit(event_queue, "generating_report", {"message": "Regenerating report..."})
+
+        new_report = await orchestrator._generate_report(
+            topic=result.query,
+            plan=result.final_plan,
+            context=context,
+            model=resolved_model,
+            provider=provider,
+            event_queue=event_queue,
+        )
+
+        # 4. Update result
+        result.report = new_report
+        result.citations = context.get_all_citations()
+        result.model_used = resolved_model
+
+        # 5. Build mindmap and save
+        await orchestrator._emit(event_queue, "message", {"message": "Updating mindmap..."})
+        mindmap = build_mindmap_graph(result)
+        output_path = await save_run(result, mindmap)
+
+        # 6. Rebuild Knowledge Graph if enabled
+        if orchestrator.config.graphify.enabled:
+            await orchestrator._emit(event_queue, "message", {"message": "Updating knowledge graph..."})
+            kg = await kg_builder.build_knowledge_graph(
+                result=result,
+                run_dir=output_path,
+                graphify_mode=orchestrator.config.graphify.mode,
+                llm=orchestrator.llm,
+            )
+            await save_knowledge_graph(kg, run_id)
+
+            # Restart MCP server if enabled and running
+            if orchestrator.config.graphify.mcp_enabled and kg.graph_html_available:
+                from research_engine.knowledge_graph import mcp_bridge as kg_mcp
+                kg_json_path = output_path / "knowledge_graph.json"
+                await kg_mcp.stop_mcp_server(run_id)
+                await kg_mcp.start_mcp_server(run_id, kg_json_path)
+
+        # Emit complete event
+        await orchestrator._emit(event_queue, "complete", {
+            "run_id": run_id,
+            "query": result.query,
+            "model_used": result.model_used,
+            "progress": result.progress,
+            "total_cycles": len(result.steps),
+            "total_citations": len(result.citations),
+        })
+
+    except Exception as e:
+        logger.error(f"Re-synthesis failed: {e}", exc_info=True)
+        # Put error in queue
+        await event_queue.put({
+            "event": "error",
+            "data": {"error": str(e)},
+            "timestamp": datetime.now(UTC).isoformat(),
+        })
+
+
+@app.post("/runs/{run_id}/resynthesize")
+async def resynthesize_run(run_id: str, request: ResynthesizeRequest):
+    """Regenerate report and mindmap/KG without a full scrape rerun, excluding disabled domains."""
+    event_queue: asyncio.Queue = asyncio.Queue()
+
+    # Start re-synthesis task
+    resynth_task = asyncio.create_task(
+        run_resynthesis_task(
+            run_id=run_id,
+            disabled_domains=request.disabled_domains,
+            model=request.model,
+            provider=request.provider,
+            event_queue=event_queue,
+        )
+    )
+
+    async def event_generator():
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(event_queue.get(), timeout=30.0)
+                    event_name = event.get("event", "message")
+                    event_data = json.dumps(event.get("data", {}))
+                    yield f"event: {event_name}\ndata: {event_data}\n\n"
+
+                    if event_name == "complete":
+                        break
+                except asyncio.TimeoutError:
+                    yield ": heartbeat\n\n"
+
+                if resynth_task.done() and event_queue.empty():
+                    exc = resynth_task.exception()
+                    if exc:
+                        error_data = json.dumps({
+                            "error": f"{type(exc).__name__}: {str(exc)}"
+                        })
+                        yield f"event: error\ndata: {error_data}\n\n"
+                    break
+        except asyncio.CancelledError:
+            logger.info("SSE client disconnected from resynthesis, cancelling task")
+            resynth_task.cancel()
+        except Exception as e:
+            logger.error(f"Resynthesis SSE generator error: {e}")
+            error_data = json.dumps({"error": str(e)})
+            yield f"event: error\ndata: {error_data}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+

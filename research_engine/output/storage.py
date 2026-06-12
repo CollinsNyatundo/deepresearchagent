@@ -35,13 +35,17 @@ async def save_run(
 
     Returns the run directory path.
     """
+    import asyncio
+    import aiofiles
+
     base = Path(output_dir)
     run_dir = base / result.run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(run_dir.mkdir, parents=True, exist_ok=True)
 
     # Save Markdown report
     report_path = run_dir / "report.md"
-    report_path.write_text(result.report, encoding="utf-8")
+    async with aiofiles.open(report_path, "w", encoding="utf-8") as f:
+        await f.write(result.report)
 
     # Save summary JSON (lightweight, for listing)
     summary = RunSummary(
@@ -51,15 +55,18 @@ async def save_run(
         model_used=result.model_used,
     )
     summary_path = run_dir / "summary.json"
-    summary_path.write_text(summary.model_dump_json(indent=2), encoding="utf-8")
+    async with aiofiles.open(summary_path, "w", encoding="utf-8") as f:
+        await f.write(summary.model_dump_json(indent=2))
 
     # Save full trace JSON
     trace_path = run_dir / "trace.json"
-    trace_path.write_text(result.model_dump_json(indent=2), encoding="utf-8")
+    async with aiofiles.open(trace_path, "w", encoding="utf-8") as f:
+        await f.write(result.model_dump_json(indent=2))
 
     # Save mindmap JSON (for frontend G6 visualization)
     mindmap_path = run_dir / "mindmap.json"
-    mindmap_path.write_text(mindmap.model_dump_json(indent=2), encoding="utf-8")
+    async with aiofiles.open(mindmap_path, "w", encoding="utf-8") as f:
+        await f.write(mindmap.model_dump_json(indent=2))
 
     logger.info(f"Saved research run to: {run_dir}")
     return run_dir
