@@ -1,8 +1,9 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useDisclosure } from '@mantine/hooks';
 import {
   AppShell,
   Anchor,
+  Box,
   Burger,
   Group,
   Title,
@@ -20,28 +21,27 @@ import {
   Select,
   Loader,
   SegmentedControl,
+  Paper,
 } from '@mantine/core';
 import {
   IconFlask,
-  IconMap,
-  IconFileText,
   IconPlus,
   IconBrain,
   IconDownload,
   IconListCheck,
-  IconNetwork,
+  IconQuote,
 } from '@tabler/icons-react';
 
 import { RunList } from './components/runs/RunList';
 import { ReportView } from './components/views/ReportView';
-import { MindmapView } from './components/views/MindmapView';
-import { KnowledgeGraphView } from './components/knowledge-graph/KnowledgeGraphView';
+import { CitationsView } from './components/views/CitationsView';
 import { GitNexusWebView } from './components/code-arch/GitNexusWebView';
 import { ResearchProgress } from './components/views/ResearchProgress';
 import { PlanReview } from './components/views/PlanReview';
 import { ExportPanel } from './components/views/ExportPanel';
+import { TerminalDemo } from './components/landing/TerminalDemo';
 import { api } from './api/client';
-import type { ResearchEvent, PlanPreview } from './types/api';
+import type { ResearchEvent, PlanPreview, TelemetryResponse } from './types/api';
 
 const OPENROUTER_PRESETS = [
   {
@@ -73,6 +73,33 @@ const GROQ_PRESETS = [
   },
 ];
 
+const PRESETS = [
+  {
+    label: '⚡ Superconductivity',
+    query: 'What are the latest breakthroughs in high-temperature superconductors?',
+    provider: 'openrouter',
+    model: 'nvidia/nemotron-3-super-120b-a12b:free',
+    depth: 3,
+    mode: 'web',
+  },
+  {
+    label: '🦙 Llama Spec',
+    query: 'Analyze Llama 3.3 70B performance compared to Claude 3.5 Sonnet',
+    provider: 'groq',
+    model: 'llama-3.3-70b-versatile',
+    depth: 2,
+    mode: 'web',
+  },
+  {
+    label: '📘 TS Decorators',
+    query: 'Explain TypeScript 5.0 decorators and provide comparison to stage 2 decorators',
+    provider: 'openrouter',
+    model: 'qwen/qwen3-235b-a22b:free',
+    depth: 1,
+    mode: 'web',
+  },
+];
+
 type AppState =
   | 'idle'           // No research selected
   | 'modal'          // New research modal open (query input)
@@ -84,7 +111,7 @@ type AppState =
 export default function App() {
   const [navOpened, { toggle: toggleNav }] = useDisclosure(true);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<string | null>('report');
+  const [activeTab, setActiveTab] = useState<string | null>('citations');
   const [refreshKey, setRefreshKey] = useState(0);
 
   // Global view: 'research' | 'code-arch'
@@ -94,7 +121,7 @@ export default function App() {
   const [appState, setAppState] = useState<AppState>('idle');
 
   // New research modal
-  const [modalOpen, { open: openModal, close: closeModal }] = useDisclosure(false);
+  const [modalOpen, { close: closeModal }] = useDisclosure(false);
   const [query, setQuery] = useState('');
   const [model, setModel] = useState('nvidia/nemotron-3-super-120b-a12b:free');
   const [provider, setProvider] = useState<'openrouter' | 'groq'>('openrouter');
@@ -123,9 +150,24 @@ export default function App() {
   const [isStreaming, setIsStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Knowledge graph state (Graphify)
-  const [kgReady, setKgReady] = useState(false);
-  const [kgStats, setKgStats] = useState<{ nodes: number; edges: number; communities: number } | null>(null);
+  // Local Telemetry stats (Task 3)
+  const [telemetry, setTelemetry] = useState<TelemetryResponse | null>(null);
+
+  const fetchTelemetry = useCallback(async () => {
+    try {
+      const data = await api.getTelemetry();
+      setTelemetry(data);
+    } catch (err) {
+      console.error('Failed to fetch telemetry:', err);
+    }
+  }, []);
+
+  // Fetch telemetry on load and on transition back to idle
+  useEffect(() => {
+    if (appState === 'idle' && !selectedRunId) {
+      fetchTelemetry();
+    }
+  }, [appState, selectedRunId, fetchTelemetry]);
 
   // ─── Generate Plan (Phase 4) ──────────────────────────────
   const handleGeneratePlan = useCallback(async () => {
@@ -161,8 +203,6 @@ export default function App() {
       setIsStreaming(true);
       setAppState('streaming');
       setActiveTab('progress');
-      setKgReady(false);
-      setKgStats(null);
 
       const controller = api.streamApprovedPlan(
         {
@@ -178,15 +218,6 @@ export default function App() {
         // onEvent
         (event) => {
           setStreamEvents((prev) => [...prev, event]);
-          // Handle knowledge graph ready event
-          if (event.event === 'knowledge_graph_ready') {
-            setKgReady(true);
-            setKgStats({
-              nodes: event.data.node_count ?? 0,
-              edges: event.data.edge_count ?? 0,
-              communities: event.data.community_count ?? 0,
-            });
-          }
         },
         // onDone
         (data) => {
@@ -194,7 +225,7 @@ export default function App() {
           if (data.run_id) {
             setSelectedRunId(data.run_id);
             setRefreshKey((k) => k + 1);
-            setActiveTab('report');
+            setActiveTab('citations');
             setAppState('results');
           }
         },
@@ -210,7 +241,6 @@ export default function App() {
     [planQuery, model, depth, mode, provider],
   );
 
-  // ─── Quick Start (no plan review — direct SSE stream) ─────
   const handleQuickStart = useCallback(async () => {
     if (!query.trim()) return;
     setIsSubmitting(true);
@@ -231,14 +261,6 @@ export default function App() {
       },
       (event) => {
         setStreamEvents((prev) => [...prev, event]);
-        if (event.event === 'knowledge_graph_ready') {
-          setKgReady(true);
-          setKgStats({
-            nodes: event.data.node_count ?? 0,
-            edges: event.data.edge_count ?? 0,
-            communities: event.data.community_count ?? 0,
-          });
-        }
       },
       (data) => {
         setIsStreaming(false);
@@ -246,7 +268,7 @@ export default function App() {
         if (data.run_id) {
           setSelectedRunId(data.run_id);
           setRefreshKey((k) => k + 1);
-          setActiveTab('report');
+          setActiveTab('citations');
           setAppState('results');
         }
       },
@@ -267,9 +289,8 @@ export default function App() {
     setPlanQuery('');
     setStreamEvents([]);
     setIsStreaming(false);
-    setKgReady(false);
-    setKgStats(null);
     setAppState('idle');
+    setSelectedRunId(null);
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
@@ -280,11 +301,28 @@ export default function App() {
     <AppShell
       header={{ height: 60 }}
       navbar={{
-        width: 300,
+        width: 280,
         breakpoint: 'sm',
         collapsed: { mobile: !navOpened },
       }}
       padding="md"
+      styles={{
+        header: {
+          backgroundColor: 'var(--color-slate-900)',
+          borderBottom: '1px solid var(--color-slate-800)',
+          color: 'var(--color-text-main)',
+        },
+        navbar: {
+          backgroundColor: 'var(--color-slate-900)',
+          borderRight: '1px solid var(--color-slate-800)',
+          color: 'var(--color-text-main)',
+        },
+        main: {
+          backgroundColor: 'var(--color-slate-950)',
+          color: 'var(--color-text-main)',
+          minHeight: '100vh',
+        }
+      }}
     >
       {/* ─── Header ─────────────────────────────────────────── */}
       <AppShell.Header>
@@ -296,9 +334,9 @@ export default function App() {
               hiddenFrom="sm"
               size="sm"
             />
-            <IconBrain size={30} color="var(--mantine-color-indigo-6)" />
-            <Title order={3} visibleFrom="xs">
-              Deep Research Agent
+            <IconBrain size={28} color="var(--color-mint-500)" />
+            <Title order={3} visibleFrom="xs" style={{ fontFamily: 'Fira Sans', fontWeight: 700, letterSpacing: '-0.02em' }}>
+              DeepResearch<span style={{ color: 'var(--color-mint-500)' }}>.ai</span>
             </Title>
           </Group>
           <Group>
@@ -307,7 +345,7 @@ export default function App() {
                 Researching...
               </Badge>
             )}
-            <Badge variant="light" color={provider === 'groq' ? 'orange' : 'indigo'} size="lg">
+            <Badge variant="light" color={provider === 'groq' ? 'orange' : 'teal'} size="lg">
               {provider === 'groq' ? 'Groq: ' : ''}{model.split('/').pop()?.replace(/:.*$/, '') || 'model'}
             </Badge>
           </Group>
@@ -327,18 +365,17 @@ export default function App() {
               { label: 'Research', value: 'research' },
               { label: 'Code Arch', value: 'code-arch' },
             ]}
+            styles={{
+              root: { backgroundColor: 'var(--color-slate-950)' }
+            }}
           />
           {globalView === 'research' && (
             <>
               <Button
                 fullWidth
                 leftSection={<IconPlus size={18} />}
-                onClick={() => {
-                  resetToIdle();
-                  openModal();
-                }}
-                variant="gradient"
-                gradient={{ from: 'indigo', to: 'violet', deg: 135 }}
+                onClick={resetToIdle}
+                color="mint"
               >
                 New Research
               </Button>
@@ -348,7 +385,7 @@ export default function App() {
                 onSelectRun={(id) => {
                   resetToIdle();
                   setSelectedRunId(id);
-                  setActiveTab('report');
+                  setActiveTab('citations');
                   setAppState('results');
                 }}
               />
@@ -359,7 +396,7 @@ export default function App() {
               <Text size="xs" fw={600} c="dimmed">GITNEXUS WEB UI</Text>
               <Text size="xs" c="dimmed">
                 The official interactive graph at{' '}
-                <Anchor href="https://gitnexus.vercel.app" target="_blank" size="xs" c="indigo">
+                <Anchor href="https://gitnexus.vercel.app" target="_blank" size="xs" c="mint">
                   gitnexus.vercel.app
                 </Anchor>
                 {' '}auto-connects to your local codebase via the bridge server on port 4747.
@@ -381,8 +418,7 @@ export default function App() {
             query={planQuery}
             onApprove={handleApproveAndStart}
             onRegenerate={() => {
-              setAppState('modal');
-              openModal();
+              setAppState('idle');
             }}
             isLoading={isSubmitting}
           />
@@ -391,7 +427,7 @@ export default function App() {
         {/* Plan Loading */}
         {globalView !== 'code-arch' && appState === 'plan_loading' && (
           <Stack align="center" justify="center" style={{ height: '60vh' }}>
-            <Loader size="xl" color="indigo" />
+            <Loader size="xl" color="mint" />
             <Title order={3} c="dimmed">
               Generating Research Plan...
             </Title>
@@ -404,86 +440,291 @@ export default function App() {
           <ResearchProgress events={streamEvents} isActive={isStreaming} />
         )}
 
-        {/* Results Mode (existing tabs) */}
+        {/* Results Mode (Split Three-Pane Layout) */}
         {(appState === 'results' || appState === 'idle') && selectedRunId && globalView !== 'code-arch' && (
-          <Stack gap="md">
-            <Tabs value={activeTab} onChange={setActiveTab}>
-              <Tabs.List>
-                <Tabs.Tab
-                  value="report"
-                  leftSection={<IconFileText size={16} />}
-                >
-                  Report
-                </Tabs.Tab>
-                <Tabs.Tab
-                  value="mindmap"
-                  leftSection={<IconMap size={16} />}
-                >
-                  Mindmap
-                </Tabs.Tab>
-                <Tabs.Tab
-                  value="knowledge-graph"
-                  leftSection={<IconNetwork size={16} />}
-                  rightSection={
-                    kgReady ? (
-                      <Badge size="xs" color="teal" variant="filled" circle>
-                        ✓
-                      </Badge>
-                    ) : undefined
-                  }
-                >
-                  Knowledge Graph
-                  {kgStats && (
-                    <Text span size="xs" c="dimmed" ml={4}>
-                      ({kgStats.nodes}N)
-                    </Text>
-                  )}
-                </Tabs.Tab>
-                <Tabs.Tab
-                  value="export"
-                  leftSection={<IconDownload size={16} />}
-                >
-                  Export
-                </Tabs.Tab>
-              </Tabs.List>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
+            gap: '24px',
+            height: 'calc(100vh - 100px)',
+            overflow: 'hidden'
+          }}>
+            {/* Left Column: Markdown Report */}
+            <div style={{ overflowY: 'auto', paddingRight: '4px' }}>
+              <ReportView runId={selectedRunId} />
+            </div>
 
-              <Tabs.Panel value="report" pt="md">
-                <ReportView runId={selectedRunId} />
-              </Tabs.Panel>
-              <Tabs.Panel value="mindmap" pt="md">
-                <MindmapView runId={selectedRunId} />
-              </Tabs.Panel>
-              <Tabs.Panel value="knowledge-graph" pt="md">
-                <KnowledgeGraphView runId={selectedRunId} />
-              </Tabs.Panel>
-              <Tabs.Panel value="export" pt="md">
-                <ExportPanel runId={selectedRunId} />
-              </Tabs.Panel>
-            </Tabs>
-          </Stack>
+            {/* Right Column: Mindmap, Graph, and Export Controls */}
+            <div style={{
+              overflowY: 'auto',
+              borderLeft: '1px solid var(--color-slate-800)',
+              paddingLeft: '24px',
+              height: '100%'
+            }}>
+              <Tabs value={activeTab} onChange={setActiveTab}>
+                <Tabs.List mb="md" styles={{
+                  list: { borderColor: 'var(--color-slate-800)' }
+                }}>
+                  <Tabs.Tab
+                    value="citations"
+                    leftSection={<IconQuote size={16} />}
+                  >
+                    Citations
+                  </Tabs.Tab>
+                  <Tabs.Tab
+                    value="export"
+                    leftSection={<IconDownload size={16} />}
+                  >
+                    Export
+                  </Tabs.Tab>
+                </Tabs.List>
+
+                <Tabs.Panel value="citations" pt="xs" style={{ height: 'calc(100% - 60px)' }}>
+                  <CitationsView runId={selectedRunId} />
+                </Tabs.Panel>
+                <Tabs.Panel value="export" pt="xs">
+                  <ExportPanel runId={selectedRunId} />
+                </Tabs.Panel>
+              </Tabs>
+            </div>
+          </div>
         )}
 
-        {/* Idle — no run selected */}
+        {/* Idle — Developer Console Landing Hero */}
         {appState === 'idle' && !selectedRunId && globalView !== 'code-arch' && (
-          <Stack align="center" justify="center" style={{ height: '60vh' }}>
-            <IconFlask size={80} color="var(--mantine-color-gray-3)" stroke={1} />
-            <Title order={2} c="dimmed">
-              Deep Research Agent
-            </Title>
-            <Text c="dimmed" ta="center" maw={500} size="lg">
-              Select a past research run from the sidebar, or start a new
-              exhaustive research with the button above.
-            </Text>
-            <Button
-              size="lg"
-              variant="gradient"
-              gradient={{ from: 'indigo', to: 'violet', deg: 135 }}
-              leftSection={<IconPlus size={20} />}
-              onClick={openModal}
-              mt="md"
-            >
-              Start New Research
-            </Button>
+          <Stack gap="xl" align="center" style={{ maxWidth: 800, margin: '60px auto 0 auto', width: '100%' }}>
+            <Stack gap={6} align="center">
+              <Title order={1} style={{ fontFamily: 'Fira Sans', fontSize: '2.5rem', fontWeight: 800, letterSpacing: '-0.03em' }}>
+                Deep Research <span style={{ color: 'var(--color-mint-500)' }}>Engine</span>
+              </Title>
+              <Text size="lg" c="dimmed" ta="center" style={{ maxWidth: 600 }}>
+                Autonomous Web-Scale Scraper & Citation Compiler
+              </Text>
+            </Stack>
+
+            <Paper p="xl" withBorder style={{ width: '100%', backgroundColor: 'var(--color-slate-900)', borderColor: 'var(--color-slate-800)' }}>
+              <Stack gap="md">
+                <Textarea
+                  label="Research Objective"
+                  placeholder="research_engine --query 'What are the latest breakthroughs in high-temperature superconductors?'"
+                  minRows={3}
+                  autosize
+                  maxRows={6}
+                  value={query}
+                  onChange={(e) => setQuery(e.currentTarget.value)}
+                  required
+                  styles={{
+                    input: {
+                      fontFamily: 'Fira Code',
+                      backgroundColor: 'var(--color-slate-950)',
+                      borderColor: 'var(--color-slate-800)',
+                      color: 'var(--color-text-main)',
+                      fontSize: '0.95rem',
+                      '&:focus': {
+                        borderColor: 'var(--color-mint-500)',
+                      }
+                    }
+                  }}
+                />
+
+                <Group gap="xs" mt={-4}>
+                  {PRESETS.map((preset, idx) => (
+                    <Badge
+                      key={idx}
+                      variant="outline"
+                      color="mint"
+                      style={{ cursor: 'pointer', textTransform: 'none' }}
+                      onClick={() => {
+                        setQuery(preset.query);
+                        setProvider(preset.provider as 'openrouter' | 'groq');
+                        setMode(preset.mode as 'web' | 'github');
+                        setModel(preset.model);
+                        setDepth(preset.depth);
+                      }}
+                    >
+                      {preset.label}
+                    </Badge>
+                  ))}
+                </Group>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '15px' }}>
+                  <div>
+                    <Text size="xs" fw={600} mb={6} c="dimmed">LLM PROVIDER</Text>
+                    <SegmentedControl
+                      fullWidth
+                      value={provider}
+                      onChange={handleProviderChange}
+                      data={[
+                        { label: '🌐 OpenRouter', value: 'openrouter' },
+                        { label: '⚡ Groq', value: 'groq' },
+                      ]}
+                      styles={{
+                        root: { backgroundColor: 'var(--color-slate-950)' }
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <Text size="xs" fw={600} mb={6} c="dimmed">TARGET CORPUS</Text>
+                    <SegmentedControl
+                      fullWidth
+                      value={mode}
+                      onChange={(val) => setMode(val as 'web' | 'github')}
+                      data={[
+                        { label: '🌐 Web-Scale Scrape', value: 'web' },
+                        { label: '📁 Local Repository', value: 'github' },
+                      ]}
+                      styles={{
+                        root: { backgroundColor: 'var(--color-slate-950)' }
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '15px' }}>
+                  <TextInput
+                    label="Inference Model ID"
+                    value={model}
+                    onChange={(e) => setModel(e.currentTarget.value)}
+                    styles={{
+                      input: {
+                        fontFamily: 'Fira Code',
+                        backgroundColor: 'var(--color-slate-950)',
+                        borderColor: 'var(--color-slate-800)',
+                        fontSize: '0.85rem',
+                      }
+                    }}
+                  />
+
+                  <div>
+                    <Text size="xs" fw={600} mb={8} c="dimmed">
+                      Search Depth (Max Scrape Rounds): {depth} ({depth === 1 ? 'Quick — 6 rounds' : depth === 3 ? 'Standard — 18 rounds' : 'Exhaustive — 30 rounds'})
+                    </Text>
+                    <Slider
+                      min={1}
+                      max={5}
+                      step={1}
+                      value={depth}
+                      onChange={setDepth}
+                      marks={[
+                        { value: 1, label: 'Quick (6 rounds)' },
+                        { value: 3, label: 'Standard (18 rounds)' },
+                        { value: 5, label: 'Exhaustive (30 rounds)' },
+                      ]}
+                    />
+                  </div>
+                </div>
+
+                <Group mt="md" grow>
+                  <Button
+                    size="md"
+                    loading={isSubmitting}
+                    onClick={handleGeneratePlan}
+                    disabled={!query.trim()}
+                    color="mint"
+                    leftSection={<IconListCheck size={18} />}
+                  >
+                    Generate Plan
+                  </Button>
+                  <Button
+                    size="md"
+                    loading={isSubmitting}
+                    onClick={handleQuickStart}
+                    disabled={!query.trim()}
+                    variant="outline"
+                    color="mint"
+                    leftSection={<IconFlask size={18} />}
+                  >
+                    Quick Start
+                  </Button>
+                </Group>
+              </Stack>
+            </Paper>
+
+            {/* Bento Section: Terminal typing demo & local telemetry */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '24px', width: '100%', marginTop: '12px' }}>
+              {/* Monospace Simulated Terminal */}
+              <TerminalDemo />
+
+              {/* Local System Telemetry Bento Card */}
+              <Paper p="xl" withBorder style={{ backgroundColor: 'var(--color-slate-900)', borderColor: 'var(--color-slate-800)', height: '100%', minHeight: '420px', display: 'flex', flexDirection: 'column' }}>
+                <Stack gap="md" style={{ flex: 1 }}>
+                  <div>
+                    <Title order={4} mb={4} style={{ fontFamily: 'Fira Sans', fontWeight: 700 }}>
+                      System Engine Status
+                    </Title>
+                    <Text size="sm" c="dimmed">
+                      Real-time stats from local caches & circuit breakers.
+                    </Text>
+                  </div>
+
+                  <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                    <Paper p="md" withBorder style={{ backgroundColor: 'var(--color-slate-950)', borderColor: 'var(--color-slate-800)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                      <Text size="xs" fw={600} c="dimmed" style={{ textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Query Key Cache
+                      </Text>
+                      <Text size="xl" fw={800} c="var(--color-mint-500)" mt={4} style={{ fontFamily: 'Fira Code' }}>
+                        {telemetry ? telemetry.total_cached_queries : '0'}
+                      </Text>
+                      <Text size="10px" c="dimmed" mt={4}>
+                        query_cache table size
+                      </Text>
+                    </Paper>
+
+                    <Paper p="md" withBorder style={{ backgroundColor: 'var(--color-slate-950)', borderColor: 'var(--color-slate-800)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                      <Text size="xs" fw={600} c="dimmed" style={{ textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Scraped Document Cache
+                      </Text>
+                      <Text size="xl" fw={800} c="var(--color-mint-500)" mt={4} style={{ fontFamily: 'Fira Code' }}>
+                        {telemetry ? telemetry.total_scraped_pages : '0'}
+                      </Text>
+                      <Text size="10px" c="dimmed" mt={4}>
+                        page_cache table size
+                      </Text>
+                    </Paper>
+
+                    <Paper p="md" withBorder style={{ backgroundColor: 'var(--color-slate-950)', borderColor: 'var(--color-slate-800)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                      <Text size="xs" fw={600} c="dimmed" style={{ textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        HTTP Success Rate
+                      </Text>
+                      <Text size="xl" fw={800} c="var(--color-mint-500)" mt={4} style={{ fontFamily: 'Fira Code' }}>
+                        {telemetry ? `${telemetry.scraper_success_rate}%` : '100.0%'}
+                      </Text>
+                      <Text size="10px" c="dimmed" mt={4}>
+                        successful page fetches
+                      </Text>
+                    </Paper>
+
+                    <Paper p="md" withBorder style={{ backgroundColor: 'var(--color-slate-950)', borderColor: 'var(--color-slate-800)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                      <Text size="xs" fw={600} c="dimmed" style={{ textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Domain Breakers Open
+                      </Text>
+                      <Text size="xl" fw={800} c={telemetry && telemetry.active_circuit_breakers.length > 0 ? "red" : "var(--color-mint-500)"} mt={4} style={{ fontFamily: 'Fira Code' }}>
+                        {telemetry ? telemetry.active_circuit_breakers.length : '0'}
+                      </Text>
+                      <Text size="10px" c="dimmed" mt={4}>
+                        OPEN breakers (cooldown)
+                      </Text>
+                    </Paper>
+                  </div>
+
+                  {telemetry && telemetry.active_circuit_breakers.length > 0 && (
+                    <Box p="xs" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '6px' }}>
+                      <Text size="xs" c="red" fw={600} mb={4}>
+                        ⚠️ OPEN CIRCUITS:
+                      </Text>
+                      <Group gap={4}>
+                        {telemetry.active_circuit_breakers.map((domain, index) => (
+                          <Badge key={index} variant="filled" color="red" size="xs">
+                            {domain}
+                          </Badge>
+                        ))}
+                      </Group>
+                    </Box>
+                  )}
+                </Stack>
+              </Paper>
+            </div>
           </Stack>
         )}
 

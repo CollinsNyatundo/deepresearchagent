@@ -158,8 +158,13 @@ export function KnowledgeGraphView({ runId }: KnowledgeGraphViewProps) {
     const width = container.offsetWidth || 800;
     const height = container.offsetHeight || 600;
 
+    let isDestroyed = false;
+    let resizeObserver: ResizeObserver | null = null;
+
     // Dynamically import G6 to avoid SSR issues
     import('@antv/g6').then(({ Graph }) => {
+      if (isDestroyed) return;
+
       // Filter nodes by visible communities
       const visibleNodes = kg.nodes.filter(
         (n) => !hiddenCommunities.has(n.community)
@@ -252,17 +257,96 @@ export function KnowledgeGraphView({ runId }: KnowledgeGraphViewProps) {
 
       graph.render();
       g6Instance.current = graph;
+
+      // Set up ResizeObserver for responsive canvas scaling
+      resizeObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const { width: newWidth, height: newHeight } = entry.contentRect;
+          if (g6Instance.current && newWidth > 0 && newHeight > 0) {
+            try {
+              g6Instance.current.setSize(newWidth, newHeight);
+            } catch (err) {
+              console.error("G6 resize error:", err);
+            }
+          }
+        }
+      });
+      resizeObserver.observe(container);
     }).catch((err) => {
       console.warn('G6 import failed:', err);
     });
 
     return () => {
+      isDestroyed = true;
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
       if (g6Instance.current) {
         try { g6Instance.current.destroy(); } catch {}
         g6Instance.current = null;
       }
     };
   }, [kg, hiddenCommunities, activeTab]);
+
+  // Listen to citation highlight events
+  useEffect(() => {
+    const handleHighlight = (e: Event) => {
+      const customEvent = e as CustomEvent<{ url: string; id: string }>;
+      const { url } = customEvent.detail;
+      if (!g6Instance.current || !kg || !url) return;
+
+      try {
+        const domain = new URL(url).hostname.replace('www.', '');
+        const nodesToHighlight: string[] = [];
+        
+        kg.nodes.forEach((n) => {
+          const matchesUrl = n.summary?.toLowerCase().includes(domain.toLowerCase()) || 
+                             n.label.toLowerCase().includes(domain.toLowerCase());
+          if (matchesUrl) {
+            nodesToHighlight.push(n.id);
+          }
+        });
+
+        if (nodesToHighlight.length > 0) {
+          // G6 v5 uses getNodes
+          const nodes = g6Instance.current.getNodes?.();
+          if (nodes) {
+            nodes.forEach((nodeItem: any) => {
+              const model = nodeItem.getModel?.() || nodeItem;
+              const nodeId = model.id || model.data?.id;
+              if (nodesToHighlight.includes(nodeId)) {
+                g6Instance.current.setItemState(nodeItem, 'selected', true);
+              }
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('Highlight failed:', err);
+      }
+    };
+
+    const handleClearHighlight = () => {
+      if (!g6Instance.current || !kg) return;
+      try {
+        const nodes = g6Instance.current.getNodes?.();
+        if (nodes) {
+          nodes.forEach((nodeItem: any) => {
+            g6Instance.current.setItemState(nodeItem, 'selected', false);
+          });
+        }
+      } catch (err) {
+        console.error("Failed to clear highlight:", err);
+      }
+    };
+
+    window.addEventListener('highlight-citation', handleHighlight);
+    window.addEventListener('clear-highlight-citation', handleClearHighlight);
+
+    return () => {
+      window.removeEventListener('highlight-citation', handleHighlight);
+      window.removeEventListener('clear-highlight-citation', handleClearHighlight);
+    };
+  }, [kg]);
 
   // ── Toggle community visibility ─────────────────────────────────
   const handleToggleCommunity = useCallback((id: number) => {
