@@ -723,15 +723,22 @@ class DeepResearchOrchestrator:
 
         # ── Rerank search results ──────────────────────────────────
         if search_results:
-            try:
-                search_results = await rerank_results(
-                    query.query, search_results,
-                    llm=self.llm, model=model,
-                    top_k=request.max_pages * 2,
-                    provider=request.provider,
-                )
-            except Exception as e:
-                logger.warning(f"Reranking failed, using original order: {e}")
+            if all(r.eval_rationale for r in search_results):
+                logger.info("Skipping batch reranking; using pointwise relevance scores to sort results.")
+                search_results = sorted(search_results, key=lambda x: x.relevance_score, reverse=True)
+                top_k = request.max_pages * 2
+                if top_k:
+                    search_results = search_results[:top_k]
+            else:
+                try:
+                    search_results = await rerank_results(
+                        query.query, search_results,
+                        llm=self.llm, model=model,
+                        top_k=request.max_pages * 2,
+                        provider=request.provider,
+                    )
+                except Exception as e:
+                    logger.warning(f"Reranking failed, using original order: {e}")
 
         await self._emit(event_queue, ResearchState.SCRAPING, {
             "cycle": cycle + 1,
