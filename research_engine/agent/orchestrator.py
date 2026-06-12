@@ -360,106 +360,113 @@ class DeepResearchOrchestrator:
         final_progress = 0
         errors: list[str] = []
 
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            task = progress.add_task("Researching...", total=max_cycles)
+        try:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                task = progress.add_task("Researching...", total=max_cycles)
 
-            cycle = 0
-            while cycle < max_cycles:
-                progress.update(
-                    task,
-                    description=f"[cyan]Cycle {cycle + 1}/{max_cycles}[/cyan]",
-                    advance=1,
-                )
-
-                try:
-                    step = await self._run_cycle(
-                        cycle=cycle,
-                        topic=query,
-                        plan=current_plan,
-                        context=context,
-                        search_provider=search_provider,
-                        scraper=scraper,
-                        model=model,
-                        request=request,
-                        event_queue=event_queue,
-                        intent=intent,
+                cycle = 0
+                while cycle < max_cycles:
+                    progress.update(
+                        task,
+                        description=f"[cyan]Cycle {cycle + 1}/{max_cycles}[/cyan]",
+                        advance=1,
                     )
-                    await context.add_step(step)
 
-                    # Reflect on plan
-                    await self._emit(event_queue, ResearchState.REFLECTING, {
-                        "cycle": cycle + 1, "message": "Reflecting on plan...",
-                    })
-                    reflection = await planner_module.reflect_on_plan(
-                        query, current_plan, context.get_history_text(),
-                        llm=self.llm, model=model, provider=request.provider,
-                    )
-                    step.reflection = reflection
-                    await self._emit_thinking(event_queue, f"Cycle {cycle + 1}: Reflected on plan.\nShould Update Plan: {reflection.should_update}\nFeedback: {reflection.updates}")
-
-                    if reflection.should_update:
-                        current_plan = await planner_module.update_plan(
-                            query, current_plan, reflection,
-                            context.get_history_text(),
-                            llm=self.llm, model=model, provider=request.provider,
+                    try:
+                        step = await self._run_cycle(
+                            cycle=cycle,
+                            topic=query,
+                            plan=current_plan,
+                            context=context,
+                            search_provider=search_provider,
+                            scraper=scraper,
+                            model=model,
+                            request=request,
+                            event_queue=event_queue,
+                            intent=intent,
                         )
-                        step.plan_updated = True
-                        console.print(f"   [yellow]📝 Plan updated at cycle {cycle + 1}[/yellow]")
+                        await context.add_step(step)
 
-                    await self._emit(event_queue, ResearchState.CYCLE_COMPLETE, {
-                        "cycle": cycle + 1,
-                        "max_cycles": max_cycles,
-                        "answer_length": len(step.answer.answer),
-                        "citation_count": len(step.answer.citations),
-                        "plan_updated": step.plan_updated,
-                    })
-
-                    # Progress check
-                    check_interval = self.config.research.progress_check_interval
-                    if (cycle + 1) % check_interval == 0:
-                        final_progress = await planner_module.check_progress(
+                        # Reflect on plan
+                        await self._emit(event_queue, ResearchState.REFLECTING, {
+                            "cycle": cycle + 1, "message": "Reflecting on plan...",
+                        })
+                        reflection = await planner_module.reflect_on_plan(
                             query, current_plan, context.get_history_text(),
                             llm=self.llm, model=model, provider=request.provider,
                         )
-                        step.progress = final_progress
-                        console.print(f"   [green]📊 Progress: {final_progress}%[/green]")
-                        await self._emit(event_queue, "progress", {
-                            "progress": final_progress, "cycle": cycle + 1,
+                        step.reflection = reflection
+                        await self._emit_thinking(event_queue, f"Cycle {cycle + 1}: Reflected on plan.\nShould Update Plan: {reflection.should_update}\nFeedback: {reflection.updates}")
+
+                        if reflection.should_update:
+                            current_plan = await planner_module.update_plan(
+                                query, current_plan, reflection,
+                                context.get_history_text(),
+                                llm=self.llm, model=model, provider=request.provider,
+                            )
+                            step.plan_updated = True
+                            console.print(f"   [yellow]📝 Plan updated at cycle {cycle + 1}[/yellow]")
+
+                        await self._emit(event_queue, ResearchState.CYCLE_COMPLETE, {
+                            "cycle": cycle + 1,
+                            "max_cycles": max_cycles,
+                            "answer_length": len(step.answer.answer),
+                            "citation_count": len(step.answer.citations),
+                            "plan_updated": step.plan_updated,
                         })
 
-                        if final_progress >= self.config.research.progress_threshold:
-                            console.print(
-                                f"   [bold green]✓ Research threshold reached "
-                                f"({final_progress}%)[/bold green]"
+                        # Progress check
+                        check_interval = self.config.research.progress_check_interval
+                        if (cycle + 1) % check_interval == 0:
+                            final_progress = await planner_module.check_progress(
+                                query, current_plan, context.get_history_text(),
+                                llm=self.llm, model=model, provider=request.provider,
                             )
-                            break
-
-                    if getattr(step, "needs_more_research", False):
-                        absolute_max = self.config.research.max_cycles + 3
-                        if max_cycles < absolute_max:
-                            max_cycles += 1
-                            progress.update(task, total=max_cycles)
-                            console.print(f"   [bold yellow]⚠ Confidence low, triggered additional research cycle. Total cycles: {max_cycles}[/bold yellow]")
-                            await self._emit(event_queue, "message", {
-                                "message": f"Low confidence triggered additional research cycle (total {max_cycles})"
+                            step.progress = final_progress
+                            console.print(f"   [green]📊 Progress: {final_progress}%[/green]")
+                            await self._emit(event_queue, "progress", {
+                                "progress": final_progress, "cycle": cycle + 1,
                             })
 
-                except Exception as e:
-                    error_msg = f"Cycle {cycle + 1} failed: {type(e).__name__}: {e}"
-                    logger.error(error_msg)
-                    errors.append(error_msg)
-                    console.print(f"   [red]⚠ {error_msg}[/red]")
-                    await self._emit(event_queue, ResearchState.ERROR, {
-                        "cycle": cycle + 1, "error": error_msg,
-                    })
-                    cycle += 1
-                    continue
+                            if final_progress >= self.config.research.progress_threshold:
+                                console.print(
+                                    f"   [bold green]✓ Research threshold reached "
+                                    f"({final_progress}%)[/bold green]"
+                                )
+                                break
 
-                cycle += 1
+                        if getattr(step, "needs_more_research", False):
+                            absolute_max = self.config.research.max_cycles + 3
+                            if max_cycles < absolute_max:
+                                max_cycles += 1
+                                progress.update(task, total=max_cycles)
+                                console.print(f"   [bold yellow]⚠ Confidence low, triggered additional research cycle. Total cycles: {max_cycles}[/bold yellow]")
+                                await self._emit(event_queue, "message", {
+                                    "message": f"Low confidence triggered additional research cycle (total {max_cycles})"
+                                })
+
+                    except Exception as e:
+                        error_msg = f"Cycle {cycle + 1} failed: {type(e).__name__}: {e}"
+                        logger.error(error_msg)
+                        errors.append(error_msg)
+                        console.print(f"   [red]⚠ {error_msg}[/red]")
+                        await self._emit(event_queue, ResearchState.ERROR, {
+                            "cycle": cycle + 1, "error": error_msg,
+                        })
+                        cycle += 1
+                        continue
+
+                    cycle += 1
+        finally:
+            if hasattr(scraper, "close"):
+                try:
+                    await scraper.close()
+                except Exception as close_err:
+                    logger.error(f"Failed to close scraper: {close_err}")
 
         # ── Generate report ────────────────────────────────────────
         await self._emit(event_queue, ResearchState.GENERATING_REPORT, {
@@ -716,15 +723,22 @@ class DeepResearchOrchestrator:
 
         # ── Rerank search results ──────────────────────────────────
         if search_results:
-            try:
-                search_results = await rerank_results(
-                    query.query, search_results,
-                    llm=self.llm, model=model,
-                    top_k=request.max_pages * 2,
-                    provider=request.provider,
-                )
-            except Exception as e:
-                logger.warning(f"Reranking failed, using original order: {e}")
+            if all(r.eval_rationale for r in search_results):
+                logger.info("Skipping batch reranking; using pointwise relevance scores to sort results.")
+                search_results = sorted(search_results, key=lambda x: x.relevance_score, reverse=True)
+                top_k = request.max_pages * 2
+                if top_k:
+                    search_results = search_results[:top_k]
+            else:
+                try:
+                    search_results = await rerank_results(
+                        query.query, search_results,
+                        llm=self.llm, model=model,
+                        top_k=request.max_pages * 2,
+                        provider=request.provider,
+                    )
+                except Exception as e:
+                    logger.warning(f"Reranking failed, using original order: {e}")
 
         await self._emit(event_queue, ResearchState.SCRAPING, {
             "cycle": cycle + 1,
