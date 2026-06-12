@@ -26,6 +26,34 @@ The engine is **fully async**, **streaming over SSE**, exposes a robust REST API
 
 ---
 
+## Perplexity-Style UI/UX Redesign
+
+Deep Research Agent features a premium, interactive, Perplexity-style interface built for high-performance visual research, telemetry tracking, and codebase exploration.
+
+### 🎨 Slate Glassmorphic Design Theme
+- **OLED Slate Palette**: Premium dark-mode styling utilizing OLED Slate colors:
+  - Background: `#020617` (OLED black/slate-950)
+  - Panels & Cards: `#0f172a` (slate-900)
+  - Borders: `#1e293b` (slate-800)
+  - Accents: `#22c55e` (emerald-500)
+- **Monospace CLI Mode**: Toggleable developer CLI layouts utilizing `Fira Code` with custom flag autocompletion and interactive terminal feel.
+
+### 🧭 Compact Left Icon Sidebar
+- Compact **48px wide icon sidebar** keeps the workspace clean and maximizes canvas area.
+- Features a smooth **hover drawer** that slides out to reveal full research history and past runs without layout shifting.
+
+### 📊 Responsive Mindmap & Knowledge Graph Canvas
+- Fully **responsive canvas layouts** for AntV G6 mindmaps and knowledge graphs.
+- Auto-resizes using **`ResizeObserver`s** to dynamically handle container scaling, preventing rendering glitches and ensuring crisp visualizations.
+- **Citation Hover Event Mapping**: Real-time cross-highlighting. Hovering over in-report citations dynamically highlights the corresponding nodes in the canvas (and vice-versa).
+
+### ⚡ Collapsible Reasoning & Scraper Telemetry
+- **Collapsible Reasoning**: Accordion thinking blocks containing detailed, real-time reasoning trails that can be collapsed to keep the output tidy.
+- **Scraper Queue Telemetry**: Live progress timelines powered by Server-Sent Events (SSE) that show active URL resolution, timing metrics, transfer bytes, and scraper tiers (stealth Camoufox vs dynamic Playwright vs basic httpx).
+- **GenUI Streaming Components**: Streamed JSON block structures render live into interactive comparison tables and event timelines with smooth shimmer skeleton loading.
+
+---
+
 ## Quick Start
 
 ### Prerequisites
@@ -156,13 +184,13 @@ python -X utf8 graphify-out/test_queries.py    # Run all query tests
 | `knowledge_graph/builder.py` | Graphify integration — corpus export → subprocess → parse |
 | `knowledge_graph/enricher.py` | ArXiv/PDF corpus enricher for strategy C |
 | `knowledge_graph/mcp_bridge.py` | Graphify MCP server lifecycle + query bridge |
-| `output/storage.py` | Async run persistence (save/load JSON + markdown) |
+| `output/storage.py` | Concurrency-hardened run persistence (wrapping blocking I/O calls in `asyncio.to_thread` / `aiofiles` to prevent FastAPI event loop blockage) |
 | `output/exporter.py` | Multi-format export: MD, PDF (fpdf2), DOCX, XLSX, JSON |
 | `output/mindmap.py` | AntV G6-compatible mindmap generator + node expansion |
 | `output/formatter.py` | Markdown report formatter with citation inlining |
 | `models.py` | Pydantic v2 models — single source of truth for all data |
 | `config.py` | TOML + env var config loader with deep merge |
-| `api.py` | FastAPI app — 20+ REST/SSE endpoints (including GitNexus process mgmt) |
+| `api.py` | FastAPI app — 20+ REST/SSE endpoints (including GitNexus process mgmt and domain-excluding re-synthesis) |
 | `cli.py` | Typer CLI — `research run`, `research serve`, `research list-runs` |
 
 ### Frontend Components (`frontend/src/`)
@@ -330,6 +358,7 @@ Interactive docs: `http://localhost:8000/docs`
 |--------|----------|-------------|
 | `GET` | `/runs` | List all past runs |
 | `GET` | `/runs/{id}/report` | Get Markdown report |
+| `POST` | `/runs/{id}/resynthesize` | Re-synthesize report supporting domain filtering exclusions (SSE report chunks with race-condition event queue draining) |
 | `GET` | `/runs/{id}/mindmap` | Get mindmap graph (G6 format) |
 | `POST` | `/runs/{id}/mindmap/expand` | Drill deeper into a mindmap node |
 | `GET` | `/runs/{id}/exports` | List available export formats |
@@ -559,9 +588,10 @@ ruff format research_engine/
 | Groq TPM limit (12k) | Kept at 4096 `groq_max_tokens`; don't increase without upgrading |
 | Windows Unicode errors in graphify | Use `python -X utf8 -m graphify ...` |
 | Mantine styles broken silently | `postcss-preset-mantine` + `postcss-simple-vars` required in devDeps |
-| G6 graph renders invisible | Container must have explicit `width`/`height` — never `0×0` |
+| G6 graph renders invisible | Container must have explicit `width`/`height` — never `0×0` (now mitigated by auto-resizing `ResizeObserver`s) |
 | `.env` not loading | Ensure `load_dotenv(override=True)` runs before `get_config()` |
 | GitNexus index stale | Run `npx gitnexus analyze` after commits |
+| Re-synthesis event queue lag | Handled automatically via custom SSE event queue draining in FastAPI to prevent race conditions |
 
 ---
 
