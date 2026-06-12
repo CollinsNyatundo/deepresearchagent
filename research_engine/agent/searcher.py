@@ -66,6 +66,10 @@ async def _evaluate_relevance(
     from research_engine.llm.prompts import POINTWISE_RELEVANCE_EVALUATION_TEMPLATE
     from research_engine.models import RelevanceEvaluation
 
+    # AutoPass if snippet is empty or too short
+    if not result.snippet or len(result.snippet.strip()) < 20:
+        return result, 0.8, "AutoPass: Snippet is empty or too short to evaluate. Passing to scraper."
+
     prompt = POINTWISE_RELEVANCE_EVALUATION_TEMPLATE.format(
         sub_query=sub_query,
         snippet=result.snippet,
@@ -160,8 +164,8 @@ async def search_and_scrape(
         passed_results = search_results
 
     if not passed_results:
-        logger.warning("All search results filtered out by relevance AutoEval!")
-        return search_results, []
+        logger.warning("All search results filtered out by relevance AutoEval! Falling back to all search results.")
+        passed_results = search_results
 
     # Step 3: Take top URLs and scrape full content via Scrapling
     top_urls = [r.url for r in passed_results[:max_pages] if r.url]
