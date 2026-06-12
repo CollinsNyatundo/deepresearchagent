@@ -240,4 +240,103 @@ export type RelevanceEvaluation = {
 };
 
 
+// ─── Research Result and Q&A Trace Types ──────────────────────────────
+
+export type SearchQuery = {
+  query: string;
+  rationale?: string;
+};
+
+export type SearchResult = {
+  url: string;
+  title?: string;
+  snippet?: string;
+  score?: number;
+  relevance_score?: number;
+  eval_rationale?: string;
+  provider?: string;
+};
+
+export type ScrapedPage = {
+  url: string;
+  title?: string;
+  content: string;
+  status_code?: number;
+  content_length: number;
+  success: boolean;
+  error?: string;
+  fetcher_used?: string;
+  original_status?: number;
+  fallback_attempts?: string[];
+};
+
+export type Citation = {
+  id: string;
+  url: string;
+  title?: string;
+  domain?: string;
+  accessed_at?: string;
+  snippet?: string;
+};
+
+export type SearchAnswer = {
+  answer: string;
+  citations?: Citation[];
+};
+
+export type ResearchPlan = {
+  steps: string[];
+};
+
+export type ResearchPlanReflection = {
+  should_update: boolean;
+  updates?: string;
+};
+
+export type ResearchStep = {
+  cycle: number;
+  query: SearchQuery;
+  search_results?: SearchResult[];
+  scraped_pages?: ScrapedPage[];
+  answer: SearchAnswer;
+  reflection?: ResearchPlanReflection;
+  plan_updated?: boolean;
+  progress?: number;
+  timestamp?: string;
+  needs_more_research?: boolean;
+  confidence_score?: number;
+};
+
+export type ResearchResult = {
+  run_id: string;
+  query: string;
+  model_used: string;
+  plan: ResearchPlan;
+  final_plan: ResearchPlan;
+  steps: ResearchStep[];
+  report: string;
+  citations: Citation[];
+  progress: number;
+  started_at: string;
+  completed_at: string;
+  errors?: string[];
+};
+
+
+export type TelemetryResponse = {
+  total_cached_queries: number;
+  total_scraped_pages: number;
+  active_circuit_breakers: string[];
+  scraper_success_rate: number;
+};
+
+export type ResynthesizeRequest = {
+  disabled_domains: string[];
+  model?: string;
+  provider?: string;
+};
+
+
+
+
 

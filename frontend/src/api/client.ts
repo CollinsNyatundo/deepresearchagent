@@ -12,6 +12,8 @@ import type {
   KGQueryResult,
   KGMcpStatus,
   KGAvailability,
+  ResearchResult,
+  TelemetryResponse,
 } from '../types/api';
 
 
@@ -27,11 +29,27 @@ async function handleResponse<T>(res: Response): Promise<T> {
 
 export const api = {
   /**
+   * Fetch cache and circuit telemetry stats.
+   */
+  async getTelemetry(): Promise<TelemetryResponse> {
+    const res = await fetch(`${BASE_URL}/api/telemetry`);
+    return handleResponse<TelemetryResponse>(res);
+  },
+
+  /**
    * List all past research runs, newest first.
    */
   async listRuns(): Promise<RunSummary[]> {
     const res = await fetch(`${BASE_URL}/runs`);
     return handleResponse<RunSummary[]>(res);
+  },
+
+  /**
+   * Get the full ResearchResult details for a run.
+   */
+  async getRunDetails(runId: string): Promise<ResearchResult> {
+    const res = await fetch(`${BASE_URL}/runs/${runId}`);
+    return handleResponse<ResearchResult>(res);
   },
 
   /**
@@ -363,7 +381,9 @@ export const api = {
     return handleResponse(res);
   },
 
-  /** Open a file in the local editor. */
+  /**
+   * Open a file in the local editor.
+   */
   async openFile(path: string): Promise<{ status: string; message?: string }> {
     const res = await fetch(`${BASE_URL}/open-file`, {
       method: 'POST',
@@ -371,6 +391,84 @@ export const api = {
       body: JSON.stringify({ path }),
     });
     return handleResponse<{ status: string; message?: string }>(res);
+  },
+
+  /**
+   * Resynthesize research report excluding disabled domains with SSE streaming.
+   *
+   * Uses fetch + ReadableStream (not EventSource, since we need POST).
+   * Returns an AbortController for cleanup.
+   */
+  resynthesizeRun(
+    runId: string,
+    disabledDomains: string[],
+    onEvent: (event: ResearchEvent) => void,
+    onDone: (data: Record<string, any>) => void,
+    onError: (error: string) => void,
+  ): AbortController {
+    const controller = new AbortController();
+
+    const run = async () => {
+      try {
+        const res = await fetch(`${BASE_URL}/runs/${runId}/resynthesize`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ disabled_domains: disabledDomains }),
+          signal: controller.signal,
+        });
+
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error(body.detail || `Stream failed: ${res.status}`);
+        }
+
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error('No response body');
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          let currentEvent = 'message';
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              currentEvent = line.slice(7).trim();
+            } else if (line.startsWith('data: ')) {
+              const dataStr = line.slice(6).trim();
+              try {
+                const data = JSON.parse(dataStr);
+                const event: ResearchEvent = { event: currentEvent, data };
+                onEvent(event);
+
+                if (currentEvent === 'complete') {
+                  onDone(data);
+                  return;
+                }
+                if (currentEvent === 'error') {
+                  onError(data.error || 'Unknown error');
+                }
+              } catch {
+                // Ignore
+              }
+              currentEvent = 'message';
+            }
+          }
+        }
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') return;
+        onError(err instanceof Error ? err.message : 'Stream failed');
+      }
+    };
+
+    run();
+    return controller;
   },
 };
 

@@ -90,6 +90,7 @@ async def search_and_scrape(
     model: str | None = None,
     provider: str | None = None,
     upgrade_context: bool = False,
+    on_progress = None,
 ) -> tuple[list[SearchResult], list[ScrapedPage]]:
     """Execute search → get URLs → deep scrape top pages with Scrapling.
 
@@ -167,7 +168,7 @@ async def search_and_scrape(
     top_urls = _deduplicate_urls(top_urls)
 
     logger.info(f"Scraping {len(top_urls)} pages with Scrapling...")
-    scraped_pages = await scraper.fetch_pages(top_urls, query=query.query, upgrade_context=upgrade_context)
+    scraped_pages = await scraper.fetch_pages(top_urls, query=query.query, upgrade_context=upgrade_context, on_progress=on_progress)
 
     # Filter to successful scrapes
     successful = [p for p in scraped_pages if p.success and p.content]

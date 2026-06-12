@@ -42,6 +42,7 @@ import logging
 import re
 from urllib.parse import urlparse
 from typing import Any
+from html.parser import HTMLParser
 
 import httpx
 
@@ -68,6 +69,84 @@ class MockResponse:
                 text = self.title_content
             return MockElement()
         return None
+
+
+VOID_ELEMENTS = {
+    "area", "base", "br", "col", "embed", "hr", "img", "input",
+    "link", "meta", "param", "source", "track", "wbr"
+}
+
+
+class BoilerplateStripper(HTMLParser):
+    """HTML parser that strips boilerplate tags (nav, footer, ads) and custom class selectors."""
+
+    def __init__(self, boilerplate_classes_regex=None):
+        super().__init__()
+        self.strip_tags = {
+            "nav", "footer", "header", "aside", "script", "style", "form", "noscript", "iframe"
+        }
+        self.boilerplate_regex = boilerplate_classes_regex or re.compile(
+            r"menu|sidebar|cookie|social|share|banner|ads", re.IGNORECASE
+        )
+        self.strip_stack = []
+        self.cleaned_text_chunks: list[str] = []
+
+    def _is_boilerplate(self, tag: str, attrs: list[tuple[str, str | None]]) -> bool:
+        if tag in ("body", "html", "main", "article"):
+            return False
+        for attr, val in attrs:
+            if attr in ("class", "id") and val:
+                val_lower = val.lower()
+                # Skip layout wraps/containers to avoid stripping main content
+                if any(k in val_lower for k in ("wrap", "layout", "container", "content", "inner", "main", "body", "page")):
+                    continue
+                if self.boilerplate_regex.search(val):
+                    return True
+        return False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if not self.strip_stack:
+            should_strip = False
+            if tag in self.strip_tags:
+                should_strip = True
+            elif self._is_boilerplate(tag, attrs):
+                should_strip = True
+
+            if should_strip:
+                if tag not in VOID_ELEMENTS:
+                    self.strip_stack.append(tag)
+                return
+
+        if self.strip_stack:
+            if tag not in VOID_ELEMENTS:
+                self.strip_stack.append(tag)
+            return
+
+        if tag in ("p", "div", "li", "h1", "h2", "h3", "h4", "h5", "h6", "br", "tr"):
+            self.cleaned_text_chunks.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if self.strip_stack:
+            if tag not in VOID_ELEMENTS:
+                if tag in self.strip_stack:
+                    while self.strip_stack:
+                        popped = self.strip_stack.pop()
+                        if popped == tag:
+                            break
+            return
+
+        if tag in ("p", "div", "li", "h1", "h2", "h3", "h4", "h5", "h6", "tr"):
+            self.cleaned_text_chunks.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if not self.strip_stack:
+            self.cleaned_text_chunks.append(data)
+
+    def get_cleaned_text(self) -> str:
+        text = "".join(self.cleaned_text_chunks)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        text = re.sub(r"[ \t]+", " ", text)
+        return text.strip()
 
 
 def smart_crusher_compress(content: str, query: str) -> str:
@@ -189,14 +268,47 @@ class WebScraper:
     so the FastAPI event loop is never blocked. AsyncFetcher is awaited directly.
     """
 
-    def __init__(self, config: ScrapingConfig | None = None):
+    def __init__(
+        self,
+        config: ScrapingConfig | None = None,
+        cache_manager = None,
+        circuit_breaker = None,
+    ):
         self.config = config or ScrapingConfig()
+        self.cache_manager = cache_manager
+        self.circuit_breaker = circuit_breaker
 
-    async def fetch_page(self, url: str, query: str | None = None, upgrade_context: bool = False) -> ScrapedPage:
+    async def fetch_page(
+        self,
+        url: str,
+        query: str | None = None,
+        upgrade_context: bool = False,
+        on_progress = None,
+    ) -> ScrapedPage:
         """Fetch a single page with automatic 4-tier fetcher fallback.
 
         Returns a ScrapedPage with extracted content or error details.
         """
+        # Check domain-scoped circuit breaker
+        if self.circuit_breaker:
+            if not self.circuit_breaker.check_circuit(url):
+                logger.warning(f"Circuit Breaker tripped for {url}. Fail-fast skip.")
+                if on_progress:
+                    await on_progress(url, "SKIPPED_CIRCUIT", {"reason": "Circuit breaker is open"})
+                return ScrapedPage(
+                    url=url,
+                    success=False,
+                    error="Circuit breaker is open for this domain",
+                )
+
+        # Check local page cache (skip if upgrade_context)
+        if self.cache_manager and not upgrade_context:
+            cached = await self.cache_manager.get_scraped_page(url)
+            if cached:
+                if on_progress:
+                    await on_progress(url, "CACHE_HIT", {"content_length": cached.content_length})
+                return cached
+
         # Rewrite arXiv PDF URLs to abstract pages for high-reliability scraping
         if "arxiv.org/pdf/" in url:
             rewritten_url = url.replace("arxiv.org/pdf/", "arxiv.org/abs/")
@@ -229,6 +341,8 @@ class WebScraper:
         for fetcher_name, fetcher_fn in chain:
             try:
                 logger.debug(f"[{fetcher_name}] Trying {url}")
+                if on_progress:
+                    await on_progress(url, "TRYING_TIER", {"fetcher": fetcher_name})
                 page = await fetcher_fn(url)
 
                 status = getattr(page, "status", None)
@@ -246,6 +360,18 @@ class WebScraper:
                         )
                         scraped.original_status = original_status
                         scraped.fallback_attempts = fallback_attempts
+
+                        # Register success on circuit breaker and save to cache
+                        if self.circuit_breaker:
+                            self.circuit_breaker.register_success(url)
+                        if self.cache_manager and not upgrade_context:
+                            await self.cache_manager.set_scraped_page(scraped)
+
+                        if on_progress:
+                            await on_progress(url, "COMPLETE", {
+                                "fetcher": fetcher_name,
+                                "content_length": scraped.content_length
+                            })
                         return scraped
                     else:
                         logger.warning(
@@ -271,6 +397,13 @@ class WebScraper:
                 continue
 
         logger.error(f"✗ All fetchers failed for {url}. Last error: {last_error}")
+
+        # Register failure in circuit breaker
+        if self.circuit_breaker:
+            self.circuit_breaker.register_failure(url)
+
+        if on_progress:
+            await on_progress(url, "FAILED", {"error": last_error})
         return ScrapedPage(
             url=url,
             success=False,
@@ -285,6 +418,7 @@ class WebScraper:
         max_concurrent: int | None = None,
         query: str | None = None,
         upgrade_context: bool = False,
+        on_progress = None,
     ) -> list[ScrapedPage]:
         """Fetch multiple pages concurrently with a semaphore limit."""
         concurrency = max_concurrent or self.config.max_concurrent
@@ -292,7 +426,11 @@ class WebScraper:
 
         async def _limited_fetch(url: str) -> ScrapedPage:
             async with semaphore:
-                return await self.fetch_page(url, query=query, upgrade_context=upgrade_context)
+                if on_progress:
+                    await on_progress(url, "START", {})
+                return await self.fetch_page(
+                    url, query=query, upgrade_context=upgrade_context, on_progress=on_progress
+                )
 
         tasks = [_limited_fetch(url) for url in urls]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -429,16 +567,7 @@ class WebScraper:
     def _extract_content(self, page, url: str, fetcher_name: str, query: str | None = None, upgrade_context: bool = False) -> ScrapedPage:
         """Extract text content from a Scrapling v0.4.5 Response object.
 
-        Scrapling v0.4.5 API (verified):
-          page.get_all_text()     → clean text, strips HTML tags (str)
-          page.find("title")      → first matching element or None
-          title_el.text           → element's text content (str)
-          page.status             → HTTP status code (int)
-          page.body               → raw bytes (fallback)
-
-        Does NOT work in v0.4.5:
-          page.text, page.content → don't exist on Response objects
-          page.css("title::text") → parsel-style not supported
+        Includes DOM-based boilerplate removal using BoilerplateStripper before extraction.
         """
         title = ""
         content = ""
@@ -451,26 +580,49 @@ class WebScraper:
         except Exception:
             pass
 
-        # ── Extract body text ──────────────────────────────────────────────
+        # ── Extract body HTML & Run Boilerplate Stripping ──────────────────
+        html_str = ""
         try:
-            raw_text = page.get_all_text()
-            if isinstance(raw_text, str):
-                content = raw_text
-            elif raw_text is not None:
-                content = str(raw_text)
-        except AttributeError:
-            # Fallback: decode raw bytes body
+            html_str = str(getattr(page, "html_content", ""))
+            if not html_str:
+                raw_body = getattr(page, "body", b"")
+                if isinstance(raw_body, bytes):
+                    html_str = raw_body.decode("utf-8", errors="ignore")
+                elif isinstance(raw_body, str):
+                    html_str = raw_body
+        except Exception:
+            pass
+
+        if html_str and not upgrade_context:
             try:
-                raw = getattr(page, "body", b"")
-                if isinstance(raw, bytes):
-                    content = raw.decode("utf-8", errors="ignore")
-                elif isinstance(raw, str):
-                    content = raw
-            except Exception:
+                parser = BoilerplateStripper()
+                parser.feed(html_str)
+                content = parser.get_cleaned_text()
+            except Exception as e:
+                logger.warning(f"Boilerplate stripping failed for {url}: {e}, falling back to get_all_text")
                 content = ""
-        except Exception as e:
-            logger.warning(f"Content extraction failed for {url}: {e}")
-            content = ""
+
+        # ── Fallback: Extract standard body text ───────────────────────────
+        if not content:
+            try:
+                raw_text = page.get_all_text()
+                if isinstance(raw_text, str):
+                    content = raw_text
+                elif raw_text is not None:
+                    content = str(raw_text)
+            except AttributeError:
+                # Fallback: decode raw bytes body
+                try:
+                    raw = getattr(page, "body", b"")
+                    if isinstance(raw, bytes):
+                        content = raw.decode("utf-8", errors="ignore")
+                    elif isinstance(raw, str):
+                        content = raw
+                except Exception:
+                    content = ""
+            except Exception as e:
+                logger.warning(f"Content extraction failed for {url}: {e}")
+                content = ""
 
         # ── Clean and truncate ─────────────────────────────────────────────
         content = _clean_content(content)

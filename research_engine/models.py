@@ -427,3 +427,22 @@ class RelevanceEvaluation(BaseModel):
     rationale: str
 
 
+class TelemetryResponse(BaseModel):
+    """Local cache and circuit breaker statistics."""
+
+    total_cached_queries: int
+    total_scraped_pages: int
+    active_circuit_breakers: list[str]
+    scraper_success_rate: float
+
+
+class ResynthesizeRequest(BaseModel):
+    """Input to run research re-synthesis without full search rerun."""
+
+    disabled_domains: list[str] = Field(default_factory=list)
+    model: str | None = None
+    provider: str | None = None
+
+
+
+

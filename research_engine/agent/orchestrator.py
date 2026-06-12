@@ -51,6 +51,8 @@ from research_engine.models import (
 )
 from research_engine.output.mindmap import build_mindmap_graph
 from research_engine.output.storage import save_knowledge_graph, save_run
+from research_engine.sources.cache import CacheManager
+from research_engine.sources.circuit_breaker import CircuitBreakerManager
 from research_engine.sources.reranker import rerank_results
 from research_engine.sources.web_scraper import WebScraper
 from research_engine.sources.web_search import get_search_provider
@@ -84,7 +86,13 @@ class DeepResearchOrchestrator:
     def __init__(self, config: AppConfig | None = None):
         self.config = config or get_config()
         self.llm = LLMProvider(self.config.llm)
-        self.scraper = WebScraper(self.config.scraping)
+        self.cache_manager = CacheManager()
+        self.circuit_breaker = CircuitBreakerManager()
+        self.scraper = WebScraper(
+            config=self.config.scraping,
+            cache_manager=self.cache_manager,
+            circuit_breaker=self.circuit_breaker,
+        )
 
     async def _classify_intent(
         self,
@@ -128,6 +136,7 @@ class DeepResearchOrchestrator:
         """
         run_id = _generate_run_id()
         started_at = datetime.now(timezone.utc)
+        await self.cache_manager.init_db()
 
         await self._emit(event_queue, ResearchState.INITIALIZING, {
             "run_id": run_id, "query": request.query,
@@ -164,6 +173,7 @@ class DeepResearchOrchestrator:
             console.print(f"   Target domains: {intent.target_domains}")
         if intent.avoid_domains:
             console.print(f"   Avoid domains: {intent.avoid_domains}")
+        await self._emit_thinking(event_queue, f"Intent Classification Category: {intent.category.value}\nRationale: {intent.rationale}")
 
         # ── Plan generation ────────────────────────────────────────
         if intent.steps_override:
@@ -177,6 +187,7 @@ class DeepResearchOrchestrator:
             plan = await planner_module.create_plan(
                 request.query, llm=self.llm, model=model, provider=request.provider
             )
+        await self._emit_thinking(event_queue, "Created Research Plan Steps:\n" + "\n".join(f"- {s}" for s in plan.steps))
 
         # ── Query decomposition ────────────────────────────────────
         if intent.sub_queries:
@@ -190,6 +201,7 @@ class DeepResearchOrchestrator:
                 request.query, llm=self.llm, model=model, provider=request.provider
             )
         console.print(f"   Sub-queries: {sub_queries}")
+        await self._emit_thinking(event_queue, "Decomposed sub-queries:\n" + "\n".join(f"- {q}" for q in sub_queries))
 
         await self._emit(event_queue, ResearchState.PLAN_READY, {
             "plan": {"steps": plan.steps},
@@ -237,6 +249,7 @@ class DeepResearchOrchestrator:
         """
         run_id = _generate_run_id()
         started_at = datetime.now(timezone.utc)
+        await self.cache_manager.init_db()
 
         model = self._resolve_model(approval.model, provider=approval.provider)
         if getattr(approval, "mode", "web") == "github":
@@ -269,6 +282,7 @@ class DeepResearchOrchestrator:
             console.print(f"   Target domains: {intent.target_domains}")
         if intent.avoid_domains:
             console.print(f"   Avoid domains: {intent.avoid_domains}")
+        await self._emit_thinking(event_queue, f"Intent Classification Category: {intent.category.value}\nRationale: {intent.rationale}")
 
         await self._emit(event_queue, ResearchState.INITIALIZING, {
             "run_id": run_id,
@@ -279,6 +293,8 @@ class DeepResearchOrchestrator:
         # Use the user's approved plan directly — NO plan generation
         plan = approval.plan
         sub_queries = approval.sub_queries or [approval.query]
+        await self._emit_thinking(event_queue, f"Using user-approved plan steps:\n" + "\n".join(f"- {s}" for s in plan.steps))
+        await self._emit_thinking(event_queue, f"Using user-approved sub-queries:\n" + "\n".join(f"- {q}" for q in sub_queries))
 
         await self._emit(event_queue, ResearchState.PLAN_READY, {
             "plan": {"steps": plan.steps},
@@ -383,6 +399,7 @@ class DeepResearchOrchestrator:
                         llm=self.llm, model=model, provider=request.provider,
                     )
                     step.reflection = reflection
+                    await self._emit_thinking(event_queue, f"Cycle {cycle + 1}: Reflected on plan.\nShould Update Plan: {reflection.should_update}\nFeedback: {reflection.updates}")
 
                     if reflection.should_update:
                         current_plan = await planner_module.update_plan(
@@ -449,7 +466,7 @@ class DeepResearchOrchestrator:
             "message": "Writing final report...",
         })
         console.print("\n[yellow]📝 Writing final report...[/yellow]")
-        report = await self._generate_report(query, current_plan, context, model=model, provider=request.provider)
+        report = await self._generate_report(query, current_plan, context, model=model, provider=request.provider, event_queue=event_queue)
 
         # ── Build result ───────────────────────────────────────────
         all_citations = context.get_all_citations()
@@ -583,8 +600,8 @@ class DeepResearchOrchestrator:
         """
         # ── Determine if context needs upgrade (adaptive context window) ──
         upgrade_context = False
-        if cycle > 0 and context.steps:
-            last_step = context.steps[-1]
+        if cycle > 0 and context.get_trace():
+            last_step = context.get_trace()[-1]
             if last_step.confidence_score is not None and last_step.confidence_score < 0.5:
                 upgrade_context = True
                 logger.info(f"Cycle {cycle + 1}: Low confidence detected in previous cycle (<0.5). Upgrading context window payload.")
@@ -603,6 +620,7 @@ class DeepResearchOrchestrator:
             topic, plan, context.get_history_text(), llm=self.llm, model=model, provider=request.provider
         )
         console.print(f"   🔍 Query: {query.query}")
+        await self._emit_thinking(event_queue, f"Cycle {cycle + 1}: Generated optimal search query.\nQuery: {query.query}\nRationale: {query.rationale}")
 
         # ── Search with reflective retry ───────────────────────────
         await self._emit(event_queue, ResearchState.SEARCHING, {
@@ -612,63 +630,89 @@ class DeepResearchOrchestrator:
         search_results = []
         scraped_pages = []
 
-        try:
-            search_results, scraped_pages = await searcher_module.search_and_scrape(
-                query,
-                search_provider=cycle_search_provider,
-                scraper=scraper,
-                max_pages=request.max_pages,
-                intent=intent,
-                llm=self.llm,
-                model=model,
-                provider=request.provider,
-                upgrade_context=upgrade_context,
-            )
-        except Exception as e:
-            logger.warning(f"Search/scrape failed in cycle {cycle + 1}: {e}")
-            await self._emit(event_queue, ResearchState.RETRYING, {
+        async def _scrape_progress_cb(url: str, status: str, details: dict):
+            await self._emit(event_queue, "scrape_progress", {
                 "cycle": cycle + 1,
-                "error": str(e),
-                "step_type": "search",
-                "message": "Analyzing failure and retrying...",
+                "url": url,
+                "status": status,
+                "details": details,
             })
 
-            # ── Reflective retry via standalone module ─────────────
-            correction = await reflective_retry(
-                error=e,
-                context={
-                    "step_type": "search",
-                    "current_query": query.query,
-                    "cycle": cycle + 1,
-                },
-                llm=self.llm,
-                model=model,
-                provider=request.provider,
-                retry_count=0,
+        # Check local query cache first
+        cached_results = await self.cache_manager.get_search_results(query.query)
+        if cached_results is not None:
+            logger.info(f"Using cached search results for: {query.query}")
+            search_results = cached_results
+            top_urls = [r.url for r in search_results[:request.max_pages] if r.url]
+            top_urls = searcher_module._deduplicate_urls(top_urls)
+            scraped_pages = await scraper.fetch_pages(
+                top_urls, query=query.query, upgrade_context=upgrade_context, on_progress=_scrape_progress_cb
             )
-
-            if correction.corrected_query and not correction.should_skip:
-                console.print(f"   [yellow]🔄 Retry: {correction.corrected_query}[/yellow]")
-                query = SearchQuery(
-                    query=correction.corrected_query,
-                    rationale=f"Reflective retry: {correction.reasoning}",
+        else:
+            try:
+                search_results, scraped_pages = await searcher_module.search_and_scrape(
+                    query,
+                    search_provider=cycle_search_provider,
+                    scraper=scraper,
+                    max_pages=request.max_pages,
+                    intent=intent,
+                    llm=self.llm,
+                    model=model,
+                    provider=request.provider,
+                    upgrade_context=upgrade_context,
+                    on_progress=_scrape_progress_cb,
                 )
-                try:
-                    search_results, scraped_pages = await searcher_module.search_and_scrape(
-                        query,
-                        search_provider=cycle_search_provider,
-                        scraper=scraper,
-                        max_pages=request.max_pages,
-                        intent=intent,
-                        llm=self.llm,
-                        model=model,
-                        provider=request.provider,
-                        upgrade_context=upgrade_context,
+                if search_results:
+                    await self.cache_manager.set_search_results(query.query, search_results)
+            except Exception as e:
+                logger.warning(f"Search/scrape failed in cycle {cycle + 1}: {e}")
+                await self._emit(event_queue, ResearchState.RETRYING, {
+                    "cycle": cycle + 1,
+                    "error": str(e),
+                    "step_type": "search",
+                    "message": "Analyzing failure and retrying...",
+                })
+
+                # ── Reflective retry via standalone module ─────────────
+                correction = await reflective_retry(
+                    error=e,
+                    context={
+                        "step_type": "search",
+                        "current_query": query.query,
+                        "cycle": cycle + 1,
+                    },
+                    llm=self.llm,
+                    model=model,
+                    provider=request.provider,
+                    retry_count=0,
+                )
+
+                if correction.corrected_query and not correction.should_skip:
+                    console.print(f"   [yellow]🔄 Retry: {correction.corrected_query}[/yellow]")
+                    query = SearchQuery(
+                        query=correction.corrected_query,
+                        rationale=f"Reflective retry: {correction.reasoning}",
                     )
-                except Exception as retry_err:
-                    logger.error(f"Retry also failed: {retry_err}")
-            else:
-                logger.info(f"Reflective retry decided to skip cycle {cycle + 1}")
+                    await self._emit_thinking(event_queue, f"Cycle {cycle + 1}: Search failed. Executing reflective retry.\nCorrected Query: {correction.corrected_query}\nReasoning: {correction.reasoning}")
+                    try:
+                        search_results, scraped_pages = await searcher_module.search_and_scrape(
+                            query,
+                            search_provider=cycle_search_provider,
+                            scraper=scraper,
+                            max_pages=request.max_pages,
+                            intent=intent,
+                            llm=self.llm,
+                            model=model,
+                            provider=request.provider,
+                            upgrade_context=upgrade_context,
+                            on_progress=_scrape_progress_cb,
+                        )
+                        if search_results:
+                            await self.cache_manager.set_search_results(query.query, search_results)
+                    except Exception as retry_err:
+                        logger.error(f"Retry also failed: {retry_err}")
+                else:
+                    logger.info(f"Reflective retry decided to skip cycle {cycle + 1}")
 
         # ── Rerank search results ──────────────────────────────────
         if search_results:
@@ -733,6 +777,7 @@ class DeepResearchOrchestrator:
             "cycle": cycle + 1,
             "source_pages": len(valid_pages),
         })
+        await self._emit_thinking(event_queue, f"Cycle {cycle + 1}: Scraped {len(valid_pages)} valid pages. Synthesizing answer...")
 
         if request.enable_crossover and len(valid_pages) > 0:
             answer = await crossover_module.answer_with_crossover(
@@ -745,6 +790,7 @@ class DeepResearchOrchestrator:
             )
 
         console.print(f"   ✅ Answer: {len(answer.answer)} chars, {len(answer.citations)} citations")
+        await self._emit_thinking(event_queue, f"Cycle {cycle + 1}: Synthesized answer.\nPreview:\n{answer.answer[:300]}...\nCitations generated: {len(answer.citations)}")
 
         # ── Confidence scoring (Protocol-H pattern) ────────────────
         confidence = await self._assess_confidence(
@@ -763,6 +809,7 @@ class DeepResearchOrchestrator:
             "reasoning": confidence.reasoning,
             "needs_more_research": confidence.needs_more_research,
         })
+        await self._emit_thinking(event_queue, f"Cycle {cycle + 1}: Assessed confidence.\nScore: {confidence.score:.2f}\nReasoning: {confidence.reasoning}")
 
         # Low confidence → log warning (could trigger retry in future)
         if confidence.needs_more_research and confidence.score < CONFIDENCE_THRESHOLD:
@@ -845,6 +892,7 @@ class DeepResearchOrchestrator:
         context: ctx_module.ResearchContext,
         model: str,
         provider: str | None = None,
+        event_queue: asyncio.Queue | None = None,
     ) -> str:
         """Generate the final Markdown report from all research findings."""
         from research_engine.llm.prompts import REPORT_WRITER_TEMPLATE
@@ -855,7 +903,17 @@ class DeepResearchOrchestrator:
         )
 
         try:
-            return await self.llm.call(prompt, model=model, provider=provider)
+            if event_queue is not None:
+                llm = self.llm._get_llm(model=model, provider=provider)
+                full_content = []
+                async for chunk in llm.astream(prompt):
+                    content = chunk.content
+                    if content:
+                        full_content.append(content)
+                        await self._emit(event_queue, "report_chunk", {"chunk": content})
+                return "".join(full_content)
+            else:
+                return await self.llm.call(prompt, model=model, provider=provider)
         except Exception as e:
             logger.error(f"Report generation failed: {e}")
             return f"# Research Report: {topic}\n\n{context.get_history_text()}"
@@ -889,6 +947,23 @@ class DeepResearchOrchestrator:
             })
         except Exception as e:
             logger.warning(f"Failed to emit event '{event_name}': {e}")
+
+    async def _emit_thinking(
+        self,
+        event_queue: asyncio.Queue | None,
+        text: str,
+    ) -> None:
+        """Stream rationale or thinking text to the event queue as thinking_chunk events."""
+        if event_queue is None or not text:
+            return
+        
+        tagged = f"<thinking>\n{text}\n</thinking>\n\n"
+        # Split into chunks of 40 characters
+        chunk_size = 40
+        for i in range(0, len(tagged), chunk_size):
+            chunk = tagged[i:i + chunk_size]
+            await self._emit(event_queue, "thinking_chunk", {"chunk": chunk})
+            await asyncio.sleep(0.005)
 
 
 # ═════════════════════════════════════════════════════════════════════
