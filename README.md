@@ -1,6 +1,7 @@
 <div align="center">
 
-> Autonomous deep research engine with interactive mindmap visualization, knowledge graph extraction, multi-provider LLM + search support, and code intelligence.
+# 🔬 Deep Research Agent (DRA)
+
 
 A multi-module AI-powered research platform featuring deep iterative web research, workspace-isolated personal wiki notes, and intelligent document ingestion.
 
