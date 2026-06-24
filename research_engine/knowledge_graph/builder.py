@@ -454,10 +454,11 @@ async def _parse_graphify_output(output_dir: Path, run_id: str) -> KnowledgeGrap
 
     # Parse nodes — graphify graph.json uses 'nodes' array
     raw_nodes = data.get("nodes", [])
+    raw_edges = data.get("edges", data.get("links", []))
     degree_map: dict[str, int] = {}
 
     # Count degrees from edges first
-    for raw_edge in data.get("edges", []):
+    for raw_edge in raw_edges:
         src = str(raw_edge.get("source", raw_edge.get("u", "")))
         tgt = str(raw_edge.get("target", raw_edge.get("v", "")))
         degree_map[src] = degree_map.get(src, 0) + 1
@@ -488,17 +489,22 @@ async def _parse_graphify_output(output_dir: Path, run_id: str) -> KnowledgeGrap
     god_nodes = list(god_node_ids)
 
     # Parse edges
-    for raw_edge in data.get("edges", []):
+    for raw_edge in raw_edges:
         src = str(raw_edge.get("source", raw_edge.get("u", "")))
         tgt = str(raw_edge.get("target", raw_edge.get("v", "")))
         if not src or not tgt:
             continue
+        raw_conf = raw_edge.get("confidence_score") or raw_edge.get("confidence")
+        try:
+            confidence_val = float(raw_conf) if raw_conf is not None else 1.0
+        except ValueError:
+            confidence_val = 1.0
         edges.append(KGEdge(
             source=src,
             target=tgt,
             type=str(raw_edge.get("type", raw_edge.get("label", "semantically_similar_to"))),
             provenance=str(raw_edge.get("provenance", "EXTRACTED")),
-            confidence=float(raw_edge.get("confidence", 1.0)),
+            confidence=confidence_val,
             label=str(raw_edge.get("label", "")),
         ))
 

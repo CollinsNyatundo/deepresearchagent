@@ -19,6 +19,18 @@ from research_engine.models import (
 client = TestClient(app)
 
 
+import pytest
+
+@pytest.fixture(autouse=True)
+def override_auth():
+    from research_engine.auth import verify_supabase_jwt
+    app.dependency_overrides[verify_supabase_jwt] = lambda: {"sub": "test-user-id"}
+    yield
+    app.dependency_overrides.clear()
+
+
+@patch("research_engine.api.verify_workspace_membership")
+@patch("research_engine.api.get_run_workspace_id")
 @patch("research_engine.output.storage.load_run")
 @patch("research_engine.output.storage.save_run")
 @patch("research_engine.output.storage.save_knowledge_graph")
@@ -27,7 +39,21 @@ client = TestClient(app)
 @patch("research_engine.knowledge_graph.mcp_bridge.stop_mcp_server")
 @patch("research_engine.knowledge_graph.mcp_bridge.start_mcp_server")
 @patch("research_engine.agent.orchestrator.DeepResearchOrchestrator._generate_report")
-def test_resynthesize_endpoint(mock_gen_report, mock_start_mcp, mock_stop_mcp, mock_build_kg, mock_build_mindmap, mock_save_kg, mock_save_run, mock_load_run):
+def test_resynthesize_endpoint(
+    mock_gen_report,
+    mock_start_mcp,
+    mock_stop_mcp,
+    mock_build_kg,
+    mock_build_mindmap,
+    mock_save_kg,
+    mock_save_run,
+    mock_load_run,
+    mock_get_workspace_id,
+    mock_verify_membership,
+):
+    mock_verify_membership.return_value = True
+    mock_get_workspace_id.return_value = "00000000-0000-0000-0000-000000000000"
+
     # Setup mock data
     mock_run_id = "test-run-123"
     mock_plan = ResearchPlan(steps=["Step 1"])

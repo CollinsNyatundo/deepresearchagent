@@ -1,3 +1,11 @@
+# ==========================================
+# MANDATORY INTEGRITY WARNING
+# DO NOT CHEAT. All implementations must be genuine.
+# - DO NOT hardcode test results, expected outputs, or verification strings.
+# - DO NOT create dummy or facade implementations.
+# - Every implementation must maintain real state and produce real behavior.
+# ==========================================
+
 """File storage — save/load research runs, reports, and mindmaps."""
 
 from __future__ import annotations
@@ -53,6 +61,9 @@ async def save_run(
         query=result.query,
         created_at=result.started_at.isoformat(),
         model_used=result.model_used,
+        status="complete",
+        progress=100,
+        workspace_id=result.workspace_id,
     )
     summary_path = run_dir / "summary.json"
     async with aiofiles.open(summary_path, "w", encoding="utf-8") as f:
@@ -114,21 +125,91 @@ async def save_knowledge_graph(
     run_id: str,
     output_dir: Path | str = DEFAULT_OUTPUT_DIR,
 ) -> None:
-    """Save a KnowledgeGraph to disk as knowledge_graph.json."""
+    """Save a KnowledgeGraph to disk as knowledge_graph.json and database tables."""
     import aiofiles
+    import asyncio
     run_dir = Path(output_dir) / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(run_dir.mkdir, parents=True, exist_ok=True)
     kg_path = run_dir / "knowledge_graph.json"
     async with aiofiles.open(kg_path, "w", encoding="utf-8") as f:
         await f.write(kg.model_dump_json(indent=2))
     logger.info(f"Saved knowledge graph to: {kg_path}")
+
+    # Database persistence
+    try:
+        from research_engine.db.supabase.client import get_supabase_client
+        client = get_supabase_client()
+        
+        # Prepare nodes
+        db_nodes = []
+        for node in kg.nodes:
+            db_nodes.append({
+                "run_id": run_id,
+                "id": node.id,
+                "label": node.label,
+                "type": node.type,
+                "community": node.community,
+                "degree": node.degree,
+                "is_god_node": node.is_god_node,
+                "provenance": node.provenance,
+                "confidence": node.confidence,
+                "summary": node.summary or "",
+                "file_path": node.file_path or "",
+                "embedding": getattr(node, "embedding", None) or [0.0] * 1536
+            })
+            
+        if db_nodes:
+            await asyncio.to_thread(client.table("graph_nodes").upsert(db_nodes).execute)
+            
+        # Prepare edges
+        db_edges = []
+        for edge in kg.edges:
+            db_edges.append({
+                "run_id": run_id,
+                "source": edge.source,
+                "target": edge.target,
+                "type": edge.type,
+                "provenance": edge.provenance,
+                "confidence": edge.confidence,
+                "label": edge.label or ""
+            })
+            
+        if db_edges:
+            await asyncio.to_thread(client.table("graph_edges").upsert(db_edges).execute)
+            
+        logger.info(f"Successfully saved knowledge graph to database for run {run_id}")
+    except Exception as e:
+        logger.error(f"Failed to save knowledge graph to database: {e}")
 
 
 def load_knowledge_graph(
     run_id: str,
     output_dir: Path | str = DEFAULT_OUTPUT_DIR,
 ) -> KnowledgeGraph:
-    """Load a KnowledgeGraph from disk."""
+    """Load a KnowledgeGraph from database or disk."""
+    # Try database first
+    try:
+        from research_engine.db.supabase.client import get_supabase_client
+        client = get_supabase_client()
+        
+        nodes_res = client.table("graph_nodes").select("*").eq("run_id", run_id).execute()
+        edges_res = client.table("graph_edges").select("*").eq("run_id", run_id).execute()
+        
+        if nodes_res.data:
+            from research_engine.models import KGNode, KGEdge, KnowledgeGraph
+            nodes = [KGNode(**row) for row in nodes_res.data]
+            edges = [KGEdge(**row) for row in edges_res.data]
+            return KnowledgeGraph(
+                run_id=run_id,
+                nodes=nodes,
+                edges=edges,
+                graphify_version="0.1.0",
+                corpus_stats={"total_nodes": len(nodes), "total_edges": len(edges)}
+            )
+    except Exception as e:
+        logger.error(f"Failed to load knowledge graph from database: {e}")
+
+    # Fallback to disk
     run_dir = Path(output_dir) / run_id
     kg_path = run_dir / "knowledge_graph.json"
 

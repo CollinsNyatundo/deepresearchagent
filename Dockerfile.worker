@@ -1,0 +1,31 @@
+# ==========================================
+# MANDATORY INTEGRITY WARNING
+# DO NOT CHEAT. All implementations must be genuine.
+# - DO NOT hardcode test results, expected outputs, or verification strings.
+# - DO NOT create dummy or facade implementations.
+# - Every implementation must maintain real state and produce real behavior.
+# ==========================================
+
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y git curl libnss3 libatk-bridge2.0-0 libx11-xcb1 libxcb-dri3-0 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 libgbm1 libasound2 libpangocairo-1.0-0 libpango-1.0-0 libharfbuzz0b libgtk-3-0 && rm -rf /var/lib/apt/lists/*
+
+# Copy pyproject.toml and install dependencies (using a dummy module to satisfy build system)
+COPY pyproject.toml /app/
+RUN mkdir -p /app/research_engine && touch /app/research_engine/__init__.py
+RUN pip install --no-cache-dir .
+
+# Run browser installations
+RUN python -m camoufox fetch
+RUN python -m playwright install chromium
+
+# Copy the rest of the application files to the container
+COPY . /app
+
+# Expose port 8000 and run the worker
+EXPOSE 8000
+CMD ["uvicorn", "research_engine.worker:app", "--host", "0.0.0.0", "--port", "8000"]

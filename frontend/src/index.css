@@ -1,0 +1,349 @@
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 0%;
+    --foreground: 0 0% 88%;
+    --card: 0 0% 0%;
+    --card-foreground: 0 0% 88%;
+    --popover: 0 0% 0%;
+    --popover-foreground: 0 0% 88%;
+    --primary: 26 36% 60%;
+    --primary-foreground: 0 0% 0%;
+    --secondary: 0 0% 10%;
+    --secondary-foreground: 0 0% 88%;
+    --muted: 0 0% 10%;
+    --muted-foreground: 0 0% 60%;
+    --accent: 26 36% 60%;
+    --accent-foreground: 0 0% 0%;
+    --destructive: 0 50% 50%;
+    --destructive-foreground: 0 0% 88%;
+    --border: 0 0% 10%;
+    --input: 0 0% 10%;
+    --ring: 26 36% 60%;
+    --radius: 0.5rem;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  body {
+    background-color: #000000;
+    color: #e0e0e0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+    font-size: 14px;
+    line-height: 1.7;
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    margin: 0;
+    padding: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    overflow: hidden;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+    color: #e0e0e0;
+    line-height: 1.2;
+  }
+
+  h1 { font-size: 24px; }
+  h2 { font-size: 19.2px; }
+  h3 { font-size: 16.8px; }
+
+  a {
+    color: #d4a574;
+    text-decoration: none;
+    transition: color 150ms ease;
+  }
+
+  a:hover {
+    color: #c8956c;
+  }
+
+  code {
+    font-family: 'Fira Code', 'SF Mono', monospace;
+    font-size: 13px;
+  }
+
+  pre {
+    font-family: 'Fira Code', 'SF Mono', monospace;
+    font-size: 13px;
+  }
+
+  ::selection {
+    background: rgba(200, 149, 108, 0.3);
+    color: #e0e0e0;
+  }
+}
+
+@layer components {
+  /* ─── Liquid Glass (Standard) ──────────────────────────────────── */
+  .liquid-glass {
+    background: rgba(255, 255, 255, 0.01);
+    background-blend-mode: luminosity;
+    backdrop-filter: blur(6px) saturate(140%);
+    -webkit-backdrop-filter: blur(6px) saturate(140%);
+    border: none;
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.1),
+                0 8px 32px rgba(0, 0, 0, 0.15);
+    position: relative;
+  }
+
+  .liquid-glass::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0) 100%);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  .liquid-glass::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background:
+      radial-gradient(ellipse 90% 40% at 50% 0%, rgba(255,255,255,0.12) 0%, transparent 55%),
+      radial-gradient(ellipse 50% 25% at 50% 0%, rgba(255,255,255,0.08) 0%, transparent 50%);
+    pointer-events: none;
+  }
+
+  /* ─── Liquid Glass (Strong) ───────────────────────────────────── */
+  .liquid-glass-strong {
+    background: rgba(255, 255, 255, 0.01);
+    background-blend-mode: luminosity;
+    backdrop-filter: blur(40px) saturate(150%);
+    -webkit-backdrop-filter: blur(40px) saturate(150%);
+    border: none;
+    box-shadow: 4px 4px 4px rgba(0, 0, 0, 0.05),
+                inset 0 1px 1px rgba(255, 255, 255, 0.15);
+    position: relative;
+  }
+
+  .liquid-glass-strong::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.30) 0%, rgba(255,255,255,0) 100%);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  .liquid-glass-strong::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background:
+      radial-gradient(ellipse 90% 40% at 50% 0%, rgba(255,255,255,0.22) 0%, transparent 55%),
+      radial-gradient(ellipse 50% 25% at 50% 0%, rgba(255,255,255,0.15) 0%, transparent 50%);
+    pointer-events: none;
+  }
+
+  /* ─── Custom Scrollbar ────────────────────────────────────────── */
+  ::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 2px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.15);
+  }
+
+  /* Firefox scrollbar */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+  }
+
+  /* ─── Markdown Body (for notes and reports) ───────────────────── */
+  .md-body {
+    font-size: 14px;
+    line-height: 1.7;
+    color: #bbb;
+  }
+
+  .md-body h1,
+  .md-body h2,
+  .md-body h3,
+  .md-body h4 {
+    color: #e0e0e0;
+    font-weight: 600;
+    line-height: 1.2;
+    margin-top: 1.6em;
+    margin-bottom: 0.6em;
+  }
+
+  .md-body h1 { font-size: 24px; border-bottom: 1px solid rgba(200, 149, 108, 0.3); padding-bottom: 0.4em; }
+  .md-body h2 { font-size: 19.2px; border-bottom: 1px solid #1a1a1a; padding-bottom: 0.3em; }
+  .md-body h3 { font-size: 16.8px; }
+  .md-body h4 { font-size: 14px; }
+
+  .md-body p { margin: 0.8em 0; }
+  .md-body ul, .md-body ol { padding-left: 1.6em; margin: 0.8em 0; }
+  .md-body li { margin: 0.3em 0; }
+
+  .md-body a { color: #d4a574; text-decoration: none; }
+  .md-body a:hover { color: #c8956c; text-decoration: underline; }
+
+  .md-body code {
+    font-family: 'Fira Code', monospace;
+    background: rgba(255, 255, 255, 0.04);
+    color: #d4a574;
+    padding: 0.2em 0.4em;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+
+  .md-body pre {
+    font-family: 'Fira Code', monospace;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 1.2em;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 1.2em 0;
+  }
+
+  .md-body pre code {
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: #bbb;
+  }
+
+  .md-body blockquote {
+    border-left: 3px solid #c8956c;
+    margin: 1.2em 0;
+    padding: 0.6em 1.2em;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 0 8px 8px 0;
+    color: #999;
+  }
+
+  .md-body table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.5em 0;
+    font-size: 0.95rem;
+  }
+
+  .md-body th, .md-body td {
+    border: 1px solid #1a1a1a;
+    padding: 0.6em 0.8em;
+    text-align: left;
+  }
+
+  .md-body th {
+    background: rgba(255, 255, 255, 0.03);
+    color: #c8956c;
+    font-weight: 600;
+  }
+
+  .md-body td { color: #999; }
+
+  /* ─── Wiki Links ──────────────────────────────────────────────── */
+  .wiki-link {
+    color: #d4a574;
+    cursor: pointer;
+    transition: color 150ms ease;
+  }
+  .wiki-link:hover {
+    color: #c8956c;
+    text-decoration: underline;
+  }
+  .wiki-link.missing {
+    color: #555;
+    border-bottom: 1px dashed #555;
+  }
+  .wiki-link.missing:hover {
+    color: #999;
+  }
+
+  /* ─── Hover Transitions (150ms) ───────────────────────────────── */
+  .hover-text-dim {
+    transition: color 150ms ease;
+  }
+  .hover-text-dim:hover {
+    color: #999;
+  }
+
+  .hover-bg-subtle {
+    transition: background-color 150ms ease;
+  }
+  .hover-bg-subtle:hover {
+    background-color: rgba(255, 255, 255, 0.03);
+  }
+
+  /* ─── Empty State ──────────────────────────────────────────────── */
+  .empty-state {
+    color: #333;
+    font-size: 14px;
+  }
+
+  /* ─── Report Content (legacy class, migrated to md-body) ─────── */
+  .report-content {
+    line-height: 1.8;
+    color: #bbb;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+  }
+  .report-content h1 { font-size: 1.85rem; border-bottom: 2px solid #c8956c; padding-bottom: 0.4em; }
+  .report-content h2 { font-size: 1.45rem; border-bottom: 1px solid #1a1a1a; padding-bottom: 0.3em; }
+  .report-content h3 { font-size: 1.25rem; }
+  .report-content h4 { font-size: 1.1rem; }
+  .report-content a { color: #d4a574; }
+  .report-content a:hover { color: #c8956c; }
+  .report-content code { font-family: 'Fira Code', monospace; background: rgba(255,255,255,0.04); color: #d4a574; padding: 0.2em 0.4em; border-radius: 4px; font-size: 0.9em; }
+  .report-content pre { font-family: 'Fira Code', monospace; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); padding: 1.2em; border-radius: 8px; overflow-x: auto; }
+  .report-content pre code { background: transparent; border: none; padding: 0; color: #bbb; }
+  .report-content blockquote { border-left: 4px solid #c8956c; margin: 1.2em 0; padding: 0.6em 1.2em; background: rgba(255,255,255,0.02); border-radius: 0 8px 8px 0; color: #999; }
+  .report-content th { background: rgba(255,255,255,0.03); color: #c8956c; }
+  .report-content td { color: #999; }
+  .report-content th, .report-content td { border: 1px solid #1a1a1a; padding: 0.6em 0.8em; }
+
+  /* ─── Terminal & Telemetry (legacy) ────────────────────────────── */
+  @keyframes blink { 50% { opacity: 0; } }
+  .blink-cursor::after {
+    content: '▋';
+    color: #d4a574;
+    animation: blink 1s step-start infinite;
+    margin-left: 2px;
+  }
+  .telemetry-table { border-collapse: collapse; font-family: 'Fira Code', monospace; font-size: 0.8rem; background-color: #000; }
+  .telemetry-table th { background-color: rgba(255,255,255,0.03) !important; color: #c8956c !important; border-bottom: 1px solid rgba(255,255,255,0.06) !important; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; padding: 8px 12px !important; }
+  .telemetry-table td { border-bottom: 1px solid rgba(255,255,255,0.04) !important; padding: 6px 12px !important; color: #999; }
+  .telemetry-table tr.active-row { background-color: rgba(200, 149, 108, 0.08) !important; box-shadow: inset 2px 0 0 #c8956c; }
+  .telemetry-table tr:hover { background-color: rgba(255,255,255,0.03) !important; }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
