@@ -9,9 +9,17 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+import pytest
 from research_engine.api import app
+from research_engine.auth import verify_supabase_jwt
 
 client = TestClient(app)
+
+@pytest.fixture(autouse=True)
+def override_auth():
+    app.dependency_overrides[verify_supabase_jwt] = lambda: {"sub": "test-user-id"}
+    yield
+    app.dependency_overrides.clear()
 
 
 def test_open_file_success(monkeypatch):

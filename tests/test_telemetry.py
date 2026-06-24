@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 from research_engine.api import app
+from research_engine.auth import verify_supabase_jwt
 from research_engine.sources.circuit_breaker import CircuitBreakerManager
 
 client = TestClient(app)
+
+@pytest.fixture(autouse=True)
+def override_auth():
+    app.dependency_overrides[verify_supabase_jwt] = lambda: {"sub": "test-user-id"}
+    yield
+    app.dependency_overrides.clear()
 
 
 def test_get_telemetry_empty():

@@ -1,0 +1,78 @@
+# Version Control
+.git
+.gitnexus
+.worktrees
+
+# Python virtual environment and caches
+.venv
+venv
+env
+**/__pycache__
+**/*.py[cod]
+**/*$py.class
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+htmlcov
+
+# Node and frontend build outputs/caches
+**/node_modules
+**/dist
+**/build
+**/.vite
+frontend/.eslintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Config with secrets / local overrides
+config.toml
+**/config.toml
+**/config.local.toml
+.env
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+.compound-engineering/*.local.yaml
+
+# Research outputs and dynamic database/storage
+outputs
+research_engine/output
+graphify-out
+openkb
+
+# Chrome browser profile directories
+.chrome-profile
+
+# Agent / IDE Tooling metadata
+.agents
+..agents
+.agent
+.claude
+.context
+
+# Temporary / debug / scratch files
+.tmp
+scratch
+.tmp_fix_research.py
+debug_test_f2.py
+worker_m1_auth_db_fix
+worker_m2_similarity
+test_results*.txt
+ruff_output.txt
+
+# Large media and exports / archives
+**/*.zip
+**/*.tar.gz
+**/*.tgz
+**/*.rar
+**/*.mp4
+**/*.webm
+**/*.mov
+
+# Documents/Documentation
+docs
+*.md

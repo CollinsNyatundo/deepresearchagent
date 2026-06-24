@@ -124,17 +124,21 @@ class DeepResearchOrchestrator:
         self,
         request: ResearchRequest,
         event_queue: asyncio.Queue | None = None,
+        run_id: str | None = None,
     ) -> ResearchResult:
         """Execute a complete deep research run, generating the plan internally.
 
         Args:
             request: The research request with query, model, depth, etc.
             event_queue: Optional async queue for SSE event emission.
+            run_id: Optional run_id to reuse.
 
         Returns:
             Complete ResearchResult with report, citations, trace, and mindmap.
         """
-        run_id = _generate_run_id()
+        if not run_id:
+            run_id = _generate_run_id()
+        self.current_run_id = run_id
         started_at = datetime.now(timezone.utc)
         await self.cache_manager.init_db()
 
@@ -247,7 +251,8 @@ class DeepResearchOrchestrator:
         Returns:
             Complete ResearchResult.
         """
-        run_id = _generate_run_id()
+        run_id = approval.run_id or _generate_run_id()
+        self.current_run_id = run_id
         started_at = datetime.now(timezone.utc)
         await self.cache_manager.init_db()
 
@@ -949,10 +954,25 @@ class DeepResearchOrchestrator:
         data: dict[str, Any],
     ) -> None:
         """Emit a research event to the SSE queue (no-op if no queue)."""
+        event_name = event.value if isinstance(event, ResearchState) else event
+
+        current_run_id = getattr(self, "current_run_id", None)
+        if current_run_id:
+            try:
+                from research_engine.db.supabase.client import get_supabase_client
+                client = get_supabase_client()
+                channel_name = f"research_run:{current_run_id}"
+                client.channel(channel_name).send({
+                    "type": "broadcast",
+                    "event": event_name,
+                    "payload": data
+                })
+            except Exception as e:
+                logger.warning(f"Failed to broadcast via Supabase Realtime: {e}")
+
         if event_queue is None:
             return
 
-        event_name = event.value if isinstance(event, ResearchState) else event
         try:
             await event_queue.put({
                 "event": event_name,
@@ -985,7 +1005,5 @@ class DeepResearchOrchestrator:
 # ═════════════════════════════════════════════════════════════════════
 
 def _generate_run_id() -> str:
-    """Generate a unique run ID with timestamp."""
-    now = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    short_id = uuid.uuid4().hex[:8]
-    return f"{now}-{short_id}"
+    """Generate a unique run ID (UUID4)."""
+    return str(uuid.uuid4())

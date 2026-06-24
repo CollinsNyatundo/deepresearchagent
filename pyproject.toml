@@ -44,6 +44,10 @@ dependencies = [
     # GitNexus bridge integration
     "aiohttp>=3.9",         # Async HTTP client for GitNexus eval-server API
     # NOTE: apscheduler removed — scheduler uses pure asyncio (no extra deps)
+    # Supabase Auth
+    "pyjwt>=2.10",
+    "cryptography>=46.0",
+    "supabase>=2.31",
 ]
 
 [project.optional-dependencies]

@@ -1,59 +1,109 @@
 # CLAUDE.md — Deep Research Agent
 
-## Project Overview
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-A general-purpose deep research engine that performs multi-step web research, produces citation-backed Markdown reports, and visualizes results as interactive mindmaps. Built for local-first operation with no Docker dependency.
+## Key Commands
 
-## Architecture
+### Setup
+```bash
+# Backend
+python -m venv .venv
+.venv\Scripts\Activate.ps1  # Windows PowerShell
+pip install -e .
+pip install -e .[browser]  # Optional for stealth scraping
+python -m playwright install chromium
+python -m camoufox fetch
+cp .env.example .env  # Add API keys
+cp config.example.toml config.toml  # Adjust as needed
+
+# Frontend
+cd frontend
+npm install
+```
+
+### Development
+# Backend API server
+research serve
+
+# Quick research query (CLI)
+research run "Your research topic" --depth 3
+
+# Frontend dev server
+cd frontend && npm run dev
+
+# Run all tests
+pytest tests/ -v --asyncio-mode=auto
+
+# Backend linting/formatting
+ruff check research_engine/
+ruff format research_engine/
+
+# Frontend type check & build
+cd frontend && npm run build
+
+### GitNexus (Code Intelligence)
+# Start/stop GitNexus server (via API or manually)
+# Auto-started when visiting Code Architecture tab in UI
+npx gitnexus serve --port 4747  # Manual control
+
+# Analyze codebase (run after git changes)
+npx gitnexus analyze
+
+# Impact analysis (BEFORE editing any symbol)
+gitnexus_impact({target: "symbolName", direction: "upstream"})
+
+# Detect changes (BEFORE committing)
+gitnexus_detect_changes()
+```
+
+## Architecture Overview
 
 ```
 User → CLI / React Frontend → FastAPI API → Orchestrator (DRE algorithm)
-                                                ├── Planner (plan/reflect/update)
-                                                ├── Searcher (query gen + synthesis)
-                                                │     ├── Web Search (DDG/Tavily/Brave)
-                                                │     └── Web Scraper (Scrapling async)
-                                                ├── Crossover (candidate evolution)
-                                                └── Output (report + mindmap + storage)
-                                                      └── LLM Provider (OpenRouter)
+                                ├── Planner (plan/reflect/update)
+                                ├── Searcher (query gen + synthesis)
+                                │     ├── Web Search (DDG/Tavily/Brave)
+                                │     └── Web Scraper (Scrapling async)
+                                ├── Crossover (candidate evolution)
+                                └── Output (report + mindmap + storage)
+                                      └── LLM Provider (OpenRouter)
 ```
 
-## Tech Stack
+**Key Modules:**
+- `research_engine/agent/` - DRE algorithm (planner, searcher, crossover, etc.)
+- `research_engine/sources/` - Web search, scraping (Scrapling), GitHub MCP
+- `research_engine/knowledge_graph/` - Graphify integration, MCP bridge
+- `research_engine/output/` - Report formatting, mindmap, storage
+- `frontend/src/` - React frontend with Tailwind CSS and Radix UI
 
-### Backend (Python 3.11 + pip)
-- **Agent**: Re-implemented DRE (Deep Researcher Reflect Evolve) algorithm — fully async
-- **Scraping**: Scrapling (StealthyFetcher → DynamicFetcher → Fetcher fallback chain)
-- **LLM**: OpenRouter API via `langchain-openai` (`ChatOpenAI` with custom `base_url`)
-- **Default model**: `nvidia/nemotron-3-super-120b-a12b:free` (1M context, Mamba-Transformer MoE)
-- **Search**: DuckDuckGo (default, free) + Tavily + Brave Search
-- **API**: FastAPI with CORS for frontend
-- **CLI**: Typer + Rich
-- **Config**: TOML (`config.toml`) + env vars + per-request overrides
+## Critical Conventions
 
-### Frontend (Vite + React + TypeScript)
-- **UI**: Mantine v7 (AppShell, Tabs, forms, theming)
-- **Graph**: AntV G6 v5 (mindmap layout, `@antv/g6-extension-react`)
-- **Markdown**: `react-markdown` + `remark-gfm`
-- **Icons**: `@tabler/icons-react`
+### Python Backend
+- **All I/O is async** – Use `await` for LLM calls, scraping, file I/O (`aiofiles`)
+- **Database calls** – Supabase client is synchronous; wrap in `asyncio.to_thread()`
+- **Model per request** – Never hardcode LLM IDs; accept as parameter
+- **Pydantic v2** – All data models in `research_engine/models.py`
+- **Config hierarchy** – `config.toml` → env vars → CLI args → per-request API body
+- **Error handling** – Scrapling uses 3-tier fallback; always degrade gracefully
 
-## Key Conventions
-
-### Python
-- **All I/O is async** — use `async/await` everywhere (LLM calls, scraping, search)
-- **Pydantic v2** for all data models (`research_engine/models.py`)
-- **Type hints** on all function signatures
-- **Model is per-request** — never hardcode a model ID; accept it as a parameter
-- **Config hierarchy**: `config.toml` → env vars → CLI args → per-request API body
-- **Error handling**: Scrapling uses a 3-tier fallback chain; always gracefully degrade
-
-### TypeScript/React
-- **Mantine** for all UI components — no raw HTML forms or ad-hoc CSS
-- **AntV G6** for graph visualization only
-- **Types** in `src/types/api.ts` must mirror backend Pydantic models
-- **API client** in `src/api/client.ts` — all fetch calls go through this
+### TypeScript/Frontend (React)
+- **Tailwind CSS v3.4.19** for all styling – no custom CSS files unless global (go in `index.css`)
+- **Radix UI primitives** for accessibility-critical components (dialogs, dropdowns, tabs, etc.)
+- **Lucide React icons** exclusively – no emojis, SVG icons, or custom icon sets
+- **TypeScript types** in `src/types/api.ts` must mirror backend Pydantic models exactly
+- **API client** in `src/api/client.ts` – all fetch calls go through this
+- **Liquid glass styling** – Use `liquid-glass` class for panels/containers (see `index.css`)
+- **State** – React hooks + `localStorage`; no external state libraries
+- **Routing** – React Router v7.6.1
+- **Markdown** – `react-markdown` + `remark-gfm`
+- **Graph Visualization** – AntV G6 v5 for mindmap/knowledge graph only
+- **Virtualization** – Use `useVirtualList` hook for lists >20 items with fixed item heights
+- **Error boundaries** – Wrap modules with `ErrorBoundary` (class-based, in `components/ErrorBoundary.tsx`)
+- **Code splitting** – Use `React.lazy()` + `Suspense` with `LoadingFallback` for route modules
 
 ### File Layout
 ```
-research_engine/           # Python backend package
+research_engine/           # Python backend
   config.py                # Config loading
   models.py                # ALL Pydantic models
   agent/                   # DRE algorithm modules
@@ -64,63 +114,66 @@ research_engine/           # Python backend package
   api.py                   # FastAPI server
 
 frontend/                  # React frontend
-  src/components/layout/   # AppShell
-  src/components/runs/     # RunList, RunHeader
-  src/components/views/    # ReportView, MindmapView
-  src/components/mindmap/  # G6MindmapGraph, NodeDetailsPanel
+  src/
+    main.tsx               # Entry point (React Router)
+    App.tsx                # Route definition + lazy loading + Suspense
+    index.css              # Global styles (Tailwind, liquid glass, fonts, HSL vars)
+    api/
+      client.ts            # Frontend API client (SOURCE OF TRUTH)
+    types/
+      api.ts               # TypeScript types (mirror of models.py)
+    modules/               # Thin module containers (compose shared components)
+      research/
+        ResearchModule.tsx
+      notes/
+        NotesModule.tsx
+      documents/
+        DocumentsModule.tsx
+    components/            # Shared components organized by domain
+      Auth/                # AuthModal, WorkspaceSelector
+      backgrounds/         # 4 GPU backgrounds + renderer + switcher
+      code-arch/           # GitNexusWebView.tsx
+      knowledge-graph/     # KG visualization components
+      layout/              # Layout, Sidebar, Header
+      mindmap/             # G6MindmapGraph.tsx, NodeDetailsPanel.tsx
+      notes/               # MarkdownPreview, NoteGraph, MoonPhaseWidget
+      runs/                # RunList.tsx
+      ui/                  # EMPTY — shadcn placeholder (never used)
+      views/               # ReportView, CitationsView, ExportPanel, etc.
+      ErrorBoundary.tsx    # React error boundary (class-based)
+      LoadingSkeletons.tsx # Skeleton loaders
+    hooks/
+      useBackground.tsx    # Background mode switching
+      useVirtualList.ts    # Fixed-height list virtualization
+    lib/
+      authContext.tsx      # Auth context + Supabase auth
+      supabase.ts          # Supabase client singleton
+      utils.ts             # Utility functions (cn, etc.)
 ```
 
-## Quick Start
+### GitNexus Mandatory Practices
+1. **Before editing any symbol**: Run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report blast radius
+2. **Before committing**: Run `gitnexus_detect_changes()` to verify expected impact
+3. **Never** use find-and-replace for renaming – use `gitnexus_rename`
+4. **Explore code** with `gitnexus_query({query: "concept"})` instead of grepping
+5. **Get full context** with `gitnexus_context({name: "symbolName"})`
 
-```bash
-# Backend
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -e .
-pip install -e .[browser]  # Optional for Scrapling stealth (large download)
-python -m playwright install chromium
-python -m camoufox fetch
-cp config.example.toml config.toml  # Add your API keys
-research "Your query" --depth 5
+### Current Focus (optimize/reduce-latency branch)
+This branch focuses on latency optimization through:
+- Persistent browser instance reuse in WebScraper
+- Skipping redundant batch search result reranking
+- Fallback to all search results on relevance filter failure
+- Async I/O optimizations throughout the DRE pipeline
 
-# API server
-research serve
+When working on this branch, prioritize benchmarking with `tests/benchmark_latency.py` and profiling critical paths in `research_engine/agent/` and `research_engine/sources/`.
 
-# Frontend
-cd frontend && npm install && npm run dev
-```
-
-## Environment Variables
-
-| Variable | Required | Description |
-|---|---|---|
-| `OPENROUTER_API_KEY` | Yes | OpenRouter API key |
-| `TAVILY_API_KEY` | No | Tavily search API key |
-| `BRAVE_SEARCH_API_KEY` | No | Brave Search API key |
-
-## API Endpoints
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/runs` | List past research runs |
-| `GET` | `/runs/{id}/report` | Get Markdown report |
-| `GET` | `/runs/{id}/mindmap` | Get mindmap graph (G6 format) |
-| `POST` | `/research` | Start new research `{query, model, depth}` |
-| `POST` | `/runs/{id}/mindmap/expand` | Drill deeper on a node `{node_id}` |
-| `POST` | `/validate-model` | Validate an OpenRouter model ID |
-
-## Default Research Settings
-
-- **Depth**: 5 (exhaustive) — up to 30 research cycles
-- **Pages per query**: 5
-- **Content per page**: 20,000 chars (Nemotron's 1M context allows this)
-- **Crossover**: Enabled (3 candidates)
-- **Progress threshold**: 90%
+--- 
+*Remember: Always run GitNexus impact analysis before edits and verify changes with `detect_changes()` before committing.*
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **deepresearchagent** (2102 symbols, 3884 relationships, 95 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **deepresearchagent** (4618 symbols, 11509 relationships, 161 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

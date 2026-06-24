@@ -695,7 +695,12 @@ class WebScraper:
         # ── Extract body HTML & Run Boilerplate Stripping ──────────────────
         html_str = ""
         try:
-            html_str = str(getattr(page, "html_content", ""))
+            html_val = getattr(page, "html_content", "")
+            if isinstance(html_val, (str, bytes)):
+                html_str = html_val if isinstance(html_val, str) else html_val.decode("utf-8", errors="ignore")
+            else:
+                html_str = ""
+
             if not html_str:
                 raw_body = getattr(page, "body", b"")
                 if isinstance(raw_body, bytes):

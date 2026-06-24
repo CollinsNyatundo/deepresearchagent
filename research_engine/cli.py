@@ -2,9 +2,46 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+
+def _ensure_venv() -> None:
+    """Ensure the CLI runs using the project's virtual environment if present."""
+    cwd = os.getcwd()
+    venv_dir = os.path.join(cwd, ".venv")
+    
+    if os.path.isdir(venv_dir):
+        if sys.platform == "win32":
+            venv_python = os.path.join(venv_dir, "Scripts", "python.exe")
+        else:
+            venv_python = os.path.join(venv_dir, "bin", "python")
+            
+        if os.path.exists(venv_python):
+            real_current_py = os.path.normpath(sys.executable).lower()
+            real_venv_py = os.path.normpath(venv_python).lower()
+            
+            if real_current_py != real_venv_py:
+                if sys.argv:
+                    script_name = os.path.basename(sys.argv[0]).lower()
+                    is_cli_run = "research" in script_name or "cli.py" in script_name
+                    
+                    if is_cli_run:
+                        real_venv_dir = os.path.normpath(venv_dir).lower()
+                        if not real_current_py.startswith(real_venv_dir + os.sep):
+                            try:
+                                result = subprocess.run([venv_python, "-m", "research_engine.cli"] + sys.argv[1:])
+                                sys.exit(result.returncode)
+                            except KeyboardInterrupt:
+                                sys.exit(130)
+                            except Exception as e:
+                                print(f"Error executing virtual environment python: {e}", file=sys.stderr)
+                                sys.exit(1)
+
+_ensure_venv()
+
 import asyncio
 import logging
-import sys
 
 import typer
 from rich.console import Console
@@ -130,7 +167,12 @@ def serve(
     config_path: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
 ) -> None:
     """Start the FastAPI server for the frontend."""
+    from dotenv import load_dotenv
     import uvicorn
+
+    # Load .env BEFORE importing or starting anything — this populates
+    # DEV_AUTH_BYPASS, SUPABASE_JWT_SECRET, DATABASE_URL, etc.
+    load_dotenv()
 
     _setup_logging()
 
@@ -144,6 +186,7 @@ def serve(
         port=port,
         reload=reload,
     )
+
 
 
 @app.command()

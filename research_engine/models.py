@@ -1,3 +1,11 @@
+# ==========================================
+# MANDATORY INTEGRITY WARNING
+# DO NOT CHEAT. All implementations must be genuine.
+# - DO NOT hardcode test results, expected outputs, or verification strings.
+# - DO NOT create dummy or facade implementations.
+# - Every implementation must maintain real state and produce real behavior.
+# ==========================================
+
 """Pydantic v2 data models — source of truth for all data structures."""
 
 from __future__ import annotations
@@ -28,6 +36,8 @@ class ResearchRequest(BaseModel):
     search_provider: str | None = None  # Per-request override
     provider: str | None = None  # Per-request LLM provider override (e.g. 'groq' or 'openrouter')
     mode: ResearchMode = ResearchMode.WEB
+    workspace_id: str | None = None
+    run_id: str | None = None
 
 
 # ─── Research Planning ───────────────────────────────────────────────
@@ -140,6 +150,7 @@ class ResearchResult(BaseModel):
     started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     completed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     errors: list[str] = Field(default_factory=list)
+    workspace_id: str | None = None
 
 
 class RunSummary(BaseModel):
@@ -149,6 +160,9 @@ class RunSummary(BaseModel):
     query: str
     created_at: str
     model_used: str = ""
+    status: str = "initializing"
+    progress: int = 0
+    workspace_id: str | None = None
 
 
 # ─── Mindmap (G6 Graph) ─────────────────────────────────────────────
@@ -268,6 +282,14 @@ class KGQueryRequest(BaseModel):
     budget: int = 2000                  # Token budget for response
 
 
+class SimilarityRequest(BaseModel):
+    """Request body for similarity search in knowledge graph."""
+
+    query_embedding: list[float] = Field(..., min_items=1)
+    match_threshold: float = 0.0
+    match_count: int = 5
+
+
 class KGQueryResult(BaseModel):
     """Result of a knowledge graph query."""
 
@@ -370,6 +392,7 @@ class PlanPreview(BaseModel):
     output_formats: list[str] = Field(
         default_factory=lambda: ["markdown", "pdf", "docx", "xlsx", "mindmap_json"]
     )
+    run_id: str | None = None
 
 
 class PlanApproval(BaseModel):
@@ -390,6 +413,8 @@ class PlanApproval(BaseModel):
     provider: str | None = None
     mode: ResearchMode = ResearchMode.WEB
     export_formats: list[str] = Field(default_factory=lambda: ["markdown", "pdf"])
+    workspace_id: str | None = None
+    run_id: str | None = None
 
 
 class OpenFileRequest(BaseModel):
@@ -444,5 +469,64 @@ class ResynthesizeRequest(BaseModel):
     provider: str | None = None
 
 
+# ─── Notes Module Models ──────────────────────────────────────────────────
+
+class NoteSummary(BaseModel):
+    """Lightweight note for list views."""
+
+    id: str
+    title: str
+    workspace_id: str
+    created_at: str
+    updated_at: str
+
+
+class Note(BaseModel):
+    """Full note with content and derived fields."""
+
+    id: str
+    workspace_id: str
+    user_id: str
+    title: str
+    content: str
+    tags: list[str] = []
+    source: str | None = None
+    created_at: str
+    updated_at: str
+    outgoing_links: list[str] = []
+    backlink_count: int = 0
+
+
+class CreateNoteRequest(BaseModel):
+    """Create a new note."""
+
+    workspace_id: str
+    title: str
+    content: str = ""
+    tags: list[str] = []
+    source: str | None = None
+
+
+class UpdateNoteRequest(BaseModel):
+    """Partial update of a note."""
+
+    title: str | None = None
+    content: str | None = None
+    tags: list[str] | None = None
+    source: str | None = None
+
+
+class BulkDeleteRequest(BaseModel):
+    """Delete multiple items by ID."""
+
+    ids: list[str]
+
+
+class NoteSearchResponse(BaseModel):
+    """Search results for notes."""
+
+    notes: list[NoteSummary]
+    query: str
+    total: int
 
 
