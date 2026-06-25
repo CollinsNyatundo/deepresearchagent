@@ -1,6 +1,27 @@
 # Deep Research Agent Configuration
 # Copy this file to config.toml and fill in your API keys.
 
+# ─── REQUIRED: Supabase ─────────────────────────────────────────────────────
+# Set these environment variables before starting the server:
+#
+#   SUPABASE_URL  = https://your-project-ref.supabase.co
+#   SUPABASE_KEY  = <service_role secret key>   ← MUST be service_role, NOT anon!
+#
+# ⚠️  CRITICAL: Use the SERVICE_ROLE key, not the ANON key.
+#     The anon key triggers Row-Level Security (RLS) which blocks all backend
+#     queries (workspace_members, notes, documents) with auth.uid() = NULL.
+#     This causes 403/500 errors on every page after login.
+#
+#     Where to find the service_role key:
+#       Supabase Dashboard → Your Project → Settings → API → service_role (secret)
+#
+# These are NOT in this file because they're secrets. Set them in your shell:
+#   $env:SUPABASE_URL = "https://your-project.supabase.co"
+#   $env:SUPABASE_KEY = "eyJ..."  # service_role key
+#
+# Or create a .env file (never commit it) and load it before starting.
+# ─────────────────────────────────────────────────────────────────────────────
+
 [llm]
 # LLM provider: "openrouter" (default) or "groq"
 # Can also be set via env var: LLM_PROVIDER=groq

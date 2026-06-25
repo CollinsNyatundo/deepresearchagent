@@ -41,6 +41,7 @@ from research_engine.models import (
     PlanApproval,
     ResearchEvent,
     ResearchPlan,
+    ResearchPlanReflection,
     ResearchRequest,
     ResearchResult,
     ResearchState,
@@ -124,21 +125,17 @@ class DeepResearchOrchestrator:
         self,
         request: ResearchRequest,
         event_queue: asyncio.Queue | None = None,
-        run_id: str | None = None,
     ) -> ResearchResult:
         """Execute a complete deep research run, generating the plan internally.
 
         Args:
             request: The research request with query, model, depth, etc.
             event_queue: Optional async queue for SSE event emission.
-            run_id: Optional run_id to reuse.
 
         Returns:
             Complete ResearchResult with report, citations, trace, and mindmap.
         """
-        if not run_id:
-            run_id = _generate_run_id()
-        self.current_run_id = run_id
+        run_id = _generate_run_id()
         started_at = datetime.now(timezone.utc)
         await self.cache_manager.init_db()
 
@@ -251,8 +248,7 @@ class DeepResearchOrchestrator:
         Returns:
             Complete ResearchResult.
         """
-        run_id = approval.run_id or _generate_run_id()
-        self.current_run_id = run_id
+        run_id = _generate_run_id()
         started_at = datetime.now(timezone.utc)
         await self.cache_manager.init_db()
 
@@ -397,15 +393,21 @@ class DeepResearchOrchestrator:
                         await context.add_step(step)
 
                         # Reflect on plan
-                        await self._emit(event_queue, ResearchState.REFLECTING, {
-                            "cycle": cycle + 1, "message": "Reflecting on plan...",
-                        })
-                        reflection = await planner_module.reflect_on_plan(
-                            query, current_plan, context.get_history_text(),
-                            llm=self.llm, model=model, provider=request.provider,
-                        )
+                        confidence_val = step.confidence_score if step.confidence_score is not None else 0.0
+                        if confidence_val >= 0.8:
+                            logger.info(f"Skipping plan reflection for cycle {cycle + 1} due to high confidence ({confidence_val:.2f})")
+                            reflection = ResearchPlanReflection(should_update=False, updates="Skipped reflection due to high confidence.")
+                        else:
+                            await self._emit(event_queue, ResearchState.REFLECTING, {
+                                "cycle": cycle + 1, "message": "Reflecting on plan...",
+                            })
+                            reflection = await planner_module.reflect_on_plan(
+                                query, current_plan, context.get_history_text(),
+                                llm=self.llm, model=model, provider=request.provider,
+                            )
                         step.reflection = reflection
-                        await self._emit_thinking(event_queue, f"Cycle {cycle + 1}: Reflected on plan.\nShould Update Plan: {reflection.should_update}\nFeedback: {reflection.updates}")
+                        if confidence_val < 0.8:
+                            await self._emit_thinking(event_queue, f"Cycle {cycle + 1}: Reflected on plan.\nShould Update Plan: {reflection.should_update}\nFeedback: {reflection.updates}")
 
                         if reflection.should_update:
                             current_plan = await planner_module.update_plan(
@@ -954,25 +956,10 @@ class DeepResearchOrchestrator:
         data: dict[str, Any],
     ) -> None:
         """Emit a research event to the SSE queue (no-op if no queue)."""
-        event_name = event.value if isinstance(event, ResearchState) else event
-
-        current_run_id = getattr(self, "current_run_id", None)
-        if current_run_id:
-            try:
-                from research_engine.db.supabase.client import get_supabase_client
-                client = get_supabase_client()
-                channel_name = f"research_run:{current_run_id}"
-                client.channel(channel_name).send({
-                    "type": "broadcast",
-                    "event": event_name,
-                    "payload": data
-                })
-            except Exception as e:
-                logger.warning(f"Failed to broadcast via Supabase Realtime: {e}")
-
         if event_queue is None:
             return
 
+        event_name = event.value if isinstance(event, ResearchState) else event
         try:
             await event_queue.put({
                 "event": event_name,
@@ -1005,5 +992,7 @@ class DeepResearchOrchestrator:
 # ═════════════════════════════════════════════════════════════════════
 
 def _generate_run_id() -> str:
-    """Generate a unique run ID (UUID4)."""
-    return str(uuid.uuid4())
+    """Generate a unique run ID with timestamp."""
+    now = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    short_id = uuid.uuid4().hex[:8]
+    return f"{now}-{short_id}"

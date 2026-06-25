@@ -73,7 +73,14 @@ from research_engine.models import (
     TelemetryResponse,
     ResynthesizeRequest,
     SimilarityRequest,
-)
+    CitationVerificationRequest,
+    CitationVerificationResponse,
+)   
+from research_engine.citations.verifier import CitationVerifier, CitationStatus
+from research_engine.citations.parser import CitationParser
+from research_engine.citations.adapters.crossref import CrossRefAdapter
+from research_engine.citations.adapters.openalex import OpenAlexAdapter
+from research_engine.citations.cache import VerificationCache
 from research_engine.output.storage import (
     graph_html_available,
     knowledge_graph_available,
@@ -100,6 +107,23 @@ async def _lifespan(app: FastAPI):  # noqa: ARG001
     """Application lifespan — startup / shutdown hooks."""
     from pathlib import Path
     Path("outputs").mkdir(parents=True, exist_ok=True)
+    
+    # Test Supabase connectivity on startup so the operator gets an immediate
+    # actionable warning if the key is wrong or the project is unreachable.
+    try:
+        _client = get_supabase_client()
+        test_resp = await asyncio.to_thread(
+            _client.table("workspaces").select("id").limit(1).execute
+        )
+        logger.info("Supabase connectivity check passed.")
+    except Exception as _sb_err:
+        logger.error(
+            f"Supabase connectivity check FAILED on startup: {_sb_err}\n"
+            "  ACTION REQUIRED: Check that SUPABASE_KEY is set to the service_role key\n"
+            "  (not the anon key). Find it in: Supabase Dashboard → Settings → API → service_role.\n"
+            "  With the anon key, RLS will block all workspace_members/notes/documents queries → 500 errors."
+        )
+    
     yield
 
 
@@ -130,18 +154,40 @@ app.add_middleware(
 _gitnexus_serve_proc: asyncio.subprocess.Process | None = None
 
 
-async def verify_workspace_membership(client, workspace_id: str, user_id: str) -> bool:
-    """Verify that the user is a member of the given workspace."""
+async def verify_workspace_membership(client, workspace_id: str, user_id: str) -> None:
+    """Verify that the user is a member of the given workspace.
+
+    Raises HTTPException(403) if the user is not a member or if the membership
+    check fails (e.g. due to Supabase RLS / connectivity issues). Never returns
+    a bool — callers just await this and catch the 403 if needed.
+
+    NOTE: If SUPABASE_KEY is set to the anon key (not service_role), RLS will
+    block the workspace_members query and this will always raise 403 for valid
+    members. Set SUPABASE_KEY to the service_role key in config.toml / env.
+    """
     if user_id == "dev-bypass-user":
-        return True
+        return
     try:
         response = await asyncio.to_thread(
-            client.table("workspace_members").select("*").eq("workspace_id", workspace_id).eq("user_id", user_id).execute
+            client.table("workspace_members").select("id").eq("workspace_id", workspace_id).eq("user_id", user_id).limit(1).execute
         )
-        return len(response.data) > 0
+        if not response.data:
+            logger.warning(
+                f"Workspace membership denied: user={user_id} workspace={workspace_id}. "
+                "If this user is a valid member, ensure SUPABASE_KEY is the service_role key, not the anon key."
+            )
+            raise HTTPException(status_code=403, detail="Not authorized to access this workspace")
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Failed to check workspace membership: {e}")
-        return False
+        logger.error(
+            f"Workspace membership check failed (user={user_id} workspace={workspace_id}): {e}. "
+            "Ensure SUPABASE_KEY is the service_role key — anon key RLS will block this query."
+        )
+        raise HTTPException(
+            status_code=403,
+            detail=f"Workspace access check failed: {e}. Ensure SUPABASE_KEY is the service_role key (Supabase Dashboard → Settings → API → service_role)"
+        )
 
 async def get_run_workspace_id(client, run_id: str) -> str | None:
     """Get the workspace_id associated with a research run."""
@@ -165,8 +211,7 @@ async def check_run_access(run_id: str, user_data: dict) -> None:
     workspace_id = await get_run_workspace_id(client, run_id)
     if not workspace_id:
         raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
-    if not await verify_workspace_membership(client, workspace_id, user_id):
-        raise HTTPException(status_code=403, detail="Not authorized to access this run")
+    await verify_workspace_membership(client, workspace_id, user_id)
 
 
 
@@ -196,8 +241,7 @@ async def get_runs(workspace_id: str, user_data: dict = Depends(verify_supabase_
     if not user_id:
         raise HTTPException(status_code=400, detail="Invalid user ID in token")
     client = get_supabase_client()
-    if not await verify_workspace_membership(client, workspace_id, user_id):
-        raise HTTPException(status_code=403, detail="Not authorized to access this workspace")
+    await verify_workspace_membership(client, workspace_id, user_id)
     try:
         response = await asyncio.to_thread(
             client.table("research_runs").select("*").eq("workspace_id", workspace_id).order("created_at", desc=True).execute
@@ -275,8 +319,7 @@ async def start_research(request: ResearchRequest, user_data: dict = Depends(ver
         raise HTTPException(status_code=400, detail="Invalid user ID in token")
         
     client = get_supabase_client()
-    if not await verify_workspace_membership(client, workspace_id, user_id):
-        raise HTTPException(status_code=403, detail="Not authorized to access this workspace")
+    await verify_workspace_membership(client, workspace_id, user_id)
 
     run_id = request.run_id or _generate_run_id()
     
@@ -368,8 +411,7 @@ async def stream_research(request: ResearchRequest, user_data: dict = Depends(ve
         raise HTTPException(status_code=400, detail="Invalid user ID in token")
         
     client = get_supabase_client()
-    if not await verify_workspace_membership(client, workspace_id, user_id):
-        raise HTTPException(status_code=403, detail="Not authorized to access this workspace")
+    await verify_workspace_membership(client, workspace_id, user_id)
 
     run_id = request.run_id or _generate_run_id()
     
@@ -524,8 +566,7 @@ async def generate_plan(request: ResearchRequest, user_data: dict = Depends(veri
         raise HTTPException(status_code=400, detail="Invalid user ID in token")
         
     client = get_supabase_client()
-    if not await verify_workspace_membership(client, workspace_id, user_id):
-        raise HTTPException(status_code=403, detail="Not authorized to access this workspace")
+    await verify_workspace_membership(client, workspace_id, user_id)
 
     from research_engine.agent.orchestrator import _generate_run_id
     run_id = request.run_id or _generate_run_id()
@@ -616,8 +657,7 @@ async def execute_approved_plan(approval: PlanApproval, user_data: dict = Depend
         raise HTTPException(status_code=400, detail="Invalid user ID in token")
         
     client = get_supabase_client()
-    if not await verify_workspace_membership(client, workspace_id, user_id):
-        raise HTTPException(status_code=403, detail="Not authorized to access this workspace")
+    await verify_workspace_membership(client, workspace_id, user_id)
 
     run_id = approval.run_id or _generate_run_id()
     approval.run_id = run_id
@@ -945,8 +985,28 @@ async def validate_model(request: ModelValidationRequest, user_data: dict = Depe
 
 @app.get("/health")
 async def health():
-    """Health check endpoint."""
-    return {"status": "ok", "version": "0.2.0"}
+    """Health check endpoint — includes Supabase connectivity status."""
+    supabase_ok = False
+    supabase_detail = "unknown"
+    try:
+        _client = get_supabase_client()
+        await asyncio.to_thread(
+            _client.table("workspaces").select("id").limit(1).execute
+        )
+        supabase_ok = True
+        supabase_detail = "connected"
+    except Exception as e:
+        supabase_detail = (
+            f"error: {type(e).__name__} — "
+            "check SUPABASE_KEY is the service_role key, not the anon key"
+        )
+    
+    return {
+        "status": "ok",
+        "version": "0.2.0",
+        "supabase_connected": supabase_ok,
+        "supabase_detail": supabase_detail,
+    }
 
 
 # ─── Knowledge Graph (Graphify) ─────────────────────────────────
@@ -2047,7 +2107,9 @@ async def upload_document(
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
         
         # Save metadata to documents table
-        await asyncio.to_thread(
+        # NOTE: the `documents` table has no `tags` column — tags live in
+        # the `document_tags` junction table (document_id, tag).
+        doc_insert_response = await asyncio.to_thread(
             client.table("documents").insert({
                 "workspace_id": workspace_id,
                 "user_id": user_id,
@@ -2056,10 +2118,22 @@ async def upload_document(
                 "file_size": len(content),
                 "mime_type": file.content_type or "application/octet-stream",
                 "status": "indexed",
-                "tags": tag_list,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }).execute
         )
+        
+        # Insert tags into document_tags if any were provided
+        if tag_list and doc_insert_response.data:
+            doc_id = doc_insert_response.data[0].get("id")
+            if doc_id:
+                tag_rows = [{"document_id": doc_id, "tag": tag} for tag in tag_list]
+                try:
+                    await asyncio.to_thread(
+                        client.table("document_tags").insert(tag_rows).execute
+                    )
+                except Exception as tag_err:
+                    # Non-fatal: document is indexed, tags just won't be stored
+                    logger.warning(f"Failed to insert document tags for doc {doc_id}: {tag_err}")
         
         return {
             "document_id": str(file_path.relative_to(kb_dir)),
@@ -2068,6 +2142,8 @@ async def upload_document(
             "longread_processed": is_long,
             "message": result[:200] if result else "Document indexed successfully",
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to upload document: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -2723,3 +2799,47 @@ async def download_wiki_zip(
     except Exception as e:
         logger.error(f'Failed to download wiki: {e}')
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Citation Verification Endpoint ──────────────────────────────────
+
+@app.post("/citations/verify", response_model=CitationVerificationResponse)
+async def verify_citation(
+    request: CitationVerificationRequest,
+    user_data: dict = Depends(verify_supabase_jwt),
+):
+    """Verify a citation against CrossRef and OpenAlex.
+
+    Returns verification status, metadata, and confidence score.
+    """
+    # Build verifier with a simple HTTP client
+    class SimpleHttpClient:
+        async def get(self, url, **kwargs):
+            return {"status": 404, "json": lambda: {}}
+
+    http = SimpleHttpClient()
+    config = get_config()
+    email = getattr(config, 'email', '')
+
+    verifier = CitationVerifier(
+        parser=CitationParser(),
+        adapters=[
+            CrossRefAdapter(http_client=http, email=email),
+            OpenAlexAdapter(http_client=http, email=email),
+        ],
+        cache=VerificationCache(),
+    )
+
+    result = await verifier.verify(request.citation_text)
+
+    return CitationVerificationResponse(
+        status=result.status.value,
+        found=result.found,
+        title=result.title,
+        authors=result.authors or [],
+        year=result.year,
+        doi=result.doi,
+        url=result.url,
+        confidence=result.confidence,
+        sources=result.sources,
+    )
