@@ -78,7 +78,7 @@ class CacheManager:
         try:
             created_at = datetime.fromisoformat(created_at_str)
             age = datetime.now(UTC) - created_at
-            if age.total_seconds() > ttl_hours * 3600:
+            if age.total_seconds() >= ttl_hours * 3600:
                 logger.info(f"Query cache expired for: {query}")
                 return None
 
@@ -131,7 +131,7 @@ class CacheManager:
         try:
             created_at = datetime.fromisoformat(created_at_str)
             age = datetime.now(UTC) - created_at
-            if age.total_seconds() > ttl_hours * 3600:
+            if age.total_seconds() >= ttl_hours * 3600:
                 logger.info(f"Page cache expired for URL: {url}")
                 return None
 

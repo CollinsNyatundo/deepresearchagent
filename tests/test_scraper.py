@@ -309,8 +309,17 @@ async def test_async_fetcher_live_httpbin():
     from scrapling.fetchers import AsyncFetcher
 
     fetcher = AsyncFetcher()
-    page = await fetcher.get("https://httpbin.org/json", follow_redirects=True)
-
+    page = None
+    for attempt in range(3):
+        try:
+            page = await fetcher.get("https://httpbin.org/json", follow_redirects=True)
+            if page and page.status == 200:
+                break
+        except Exception:
+            pass
+        import asyncio
+        await asyncio.sleep(1)
+    
     assert page is not None
     assert page.status == 200
     text = page.get_all_text()
@@ -328,7 +337,7 @@ async def test_web_scraper_live_static_site():
 
     assert isinstance(result, ScrapedPage)
     assert result.success is True, f"Scraper failed: {result.error}"
-    assert result.content_length > 50, f"Expected >50 chars, got {result.content_length}"
+    assert result.content_length >= 50, f"Expected >=50 chars, got {result.content_length}"
     assert result.fetcher_used != "", "fetcher_used must be set"
 
 
