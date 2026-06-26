@@ -499,8 +499,7 @@ async def list_workspace_members(workspace_id: str, user_data: dict = Depends(ve
     from research_engine.api import verify_workspace_membership
     client = mock_supabase_client
     user_id = user_data.get("sub")
-    if not await verify_workspace_membership(client, workspace_id, user_id):
-        raise HTTPException(status_code=403, detail="Not authorized to access this workspace")
+    await verify_workspace_membership(client, workspace_id, user_id)
     response = await asyncio.to_thread(client.table("workspace_members").select("*").eq("workspace_id", workspace_id).execute)
     return response.data
 
