@@ -1,8 +1,9 @@
-import os
 import logging
-from fastapi import HTTPException, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import os
+
 import jwt
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 # Load .env at module import time so env vars are available regardless
 # of whether the caller remembered to call load_dotenv().

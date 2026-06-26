@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Type
+from typing import Any
 
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
@@ -76,7 +76,7 @@ class LLMProvider:
     ) -> ChatOpenAI:
         """Create a ChatOpenAI instance pointed at OpenRouter or Groq."""
         provider = provider or self.config.provider
-        
+
         if provider == "groq":
             api_key = self.groq_api_key
             base_url = "https://api.groq.com/openai/v1"
@@ -148,7 +148,7 @@ class LLMProvider:
     async def call_structured(
         self,
         prompt: str,
-        schema: Type[BaseModel],
+        schema: type[BaseModel],
         *,
         model: str | None = None,
         temperature: float | None = None,

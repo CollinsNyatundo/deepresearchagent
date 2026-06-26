@@ -457,6 +457,55 @@ export type Backlink = {
   snippet: string;
 };
 
+// ─── Citation Verification (Track A) ──────────────────────────────
+
+export type CitationStatus = 'verified' | 'unverified' | 'failed';
+
+export type VerificationResult = {
+  status: CitationStatus;
+  found: boolean;
+  title: string;
+  authors: string[];
+  year: number | null;
+  doi: string;
+  url: string;
+  confidence: number;
+  sources: number;
+};
+
+export type CitationVerificationRequest = {
+  citation_text: string;
+};
+
+export type CitationVerificationResponse = {
+  status: CitationStatus;
+  found: boolean;
+  title: string;
+  authors: string[];
+  year: number | null;
+  doi: string;
+  url: string;
+  confidence: number;
+  sources: number;
+};
+
+// ─── Quality Review (Track B) ─────────────────────────────────────
+
+export type QualityReport = {
+  confidence_score: number;
+  citation_verification_rate: number;
+  source_diversity_score: number;
+  completeness_score: number;
+  coherence_score: number;
+  improvement_suggestions: string[];
+  overall_score: number;
+};
+
+export type QualityReviewRequest = {
+  report: string;
+  sources: { url: string; title: string }[];
+};
+
 
 
 

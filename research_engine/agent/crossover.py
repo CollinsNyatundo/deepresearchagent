@@ -9,8 +9,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from research_engine.llm.provider import LLMProvider
 from research_engine.llm.prompts import CANDIDATES_CROSSOVER_TEMPLATE
+from research_engine.llm.provider import LLMProvider
 from research_engine.models import ScrapedPage, SearchAnswer, SearchQuery
 
 logger = logging.getLogger(__name__)

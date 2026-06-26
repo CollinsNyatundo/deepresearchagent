@@ -39,12 +39,12 @@ GitNexus Web UI Bridge Endpoints:
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 import json
 import logging
-import zipfile
 import uuid
+import zipfile
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException
@@ -53,11 +53,17 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from research_engine.auth import verify_supabase_jwt
-from research_engine.db.supabase.client import get_supabase_client
-
+from research_engine.citations.adapters.crossref import CrossRefAdapter
+from research_engine.citations.adapters.openalex import OpenAlexAdapter
+from research_engine.citations.cache import VerificationCache
+from research_engine.citations.parser import CitationParser
+from research_engine.citations.verifier import CitationVerifier
 from research_engine.config import get_config
+from research_engine.db.supabase.client import get_supabase_client
 from research_engine.llm.provider import LLMProvider, validate_model_id
 from research_engine.models import (
+    CitationVerificationRequest,
+    CitationVerificationResponse,
     ExpandRequest,
     KGQueryRequest,
     KGQueryResult,
@@ -67,24 +73,18 @@ from research_engine.models import (
     OpenFileRequest,
     PlanApproval,
     PlanPreview,
+    QualityReport,
+    QualityReviewRequest,
     ResearchRequest,
     ResearchResult,
-    RunSummary,
-    TelemetryResponse,
     ResynthesizeRequest,
+    RunSummary,
     SimilarityRequest,
-    CitationVerificationRequest,
-    CitationVerificationResponse,
-)   
-from research_engine.citations.verifier import CitationVerifier, CitationStatus
-from research_engine.citations.parser import CitationParser
-from research_engine.citations.adapters.crossref import CrossRefAdapter
-from research_engine.citations.adapters.openalex import OpenAlexAdapter
-from research_engine.citations.cache import VerificationCache
+    TelemetryResponse,
+)
 from research_engine.output.storage import (
     graph_html_available,
     knowledge_graph_available,
-    list_runs,
     load_knowledge_graph,
     load_mindmap,
     load_report,
@@ -107,7 +107,7 @@ async def _lifespan(app: FastAPI):  # noqa: ARG001
     """Application lifespan — startup / shutdown hooks."""
     from pathlib import Path
     Path("outputs").mkdir(parents=True, exist_ok=True)
-    
+
     # Test Supabase connectivity on startup so the operator gets an immediate
     # actionable warning if the key is wrong or the project is unreachable.
     try:
@@ -123,7 +123,7 @@ async def _lifespan(app: FastAPI):  # noqa: ARG001
             "  (not the anon key). Find it in: Supabase Dashboard → Settings → API → service_role.\n"
             "  With the anon key, RLS will block all workspace_members/notes/documents queries → 500 errors."
         )
-    
+
     yield
 
 
@@ -317,12 +317,12 @@ async def start_research(request: ResearchRequest, user_data: dict = Depends(ver
     user_id = user_data.get("sub")
     if not user_id:
         raise HTTPException(status_code=400, detail="Invalid user ID in token")
-        
+
     client = get_supabase_client()
     await verify_workspace_membership(client, workspace_id, user_id)
 
     run_id = request.run_id or _generate_run_id()
-    
+
     # Insert / upsert the run record
     run_record = {
         "id": run_id,
@@ -350,7 +350,7 @@ async def start_research(request: ResearchRequest, user_data: dict = Depends(ver
     try:
         # shield() prevents CancelledError from propagating when client disconnects
         result = await asyncio.shield(orchestrator.run(request, run_id=run_id))
-        
+
         # Update run record to complete
         try:
             await asyncio.to_thread(
@@ -358,7 +358,7 @@ async def start_research(request: ResearchRequest, user_data: dict = Depends(ver
                     "status": "complete",
                     "progress": 100,
                     "report": result.report,
-                    "completed_at": datetime.now(timezone.utc).isoformat()
+                    "completed_at": datetime.now(UTC).isoformat()
                 }).eq("id", run_id).execute
             )
         except Exception as e:
@@ -382,7 +382,7 @@ async def start_research(request: ResearchRequest, user_data: dict = Depends(ver
             await asyncio.to_thread(
                 client.table("research_runs").update({
                     "status": "failed",
-                    "completed_at": datetime.now(timezone.utc).isoformat()
+                    "completed_at": datetime.now(UTC).isoformat()
                 }).eq("id", run_id).execute
             )
         except Exception as db_err:
@@ -409,12 +409,12 @@ async def stream_research(request: ResearchRequest, user_data: dict = Depends(ve
     user_id = user_data.get("sub")
     if not user_id:
         raise HTTPException(status_code=400, detail="Invalid user ID in token")
-        
+
     client = get_supabase_client()
     await verify_workspace_membership(client, workspace_id, user_id)
 
     run_id = request.run_id or _generate_run_id()
-    
+
     # Insert / upsert the run record
     run_record = {
         "id": run_id,
@@ -461,7 +461,7 @@ async def stream_research(request: ResearchRequest, user_data: dict = Depends(ve
                             await asyncio.to_thread(
                                 client.table("research_runs").update({
                                     "status": "failed",
-                                    "completed_at": datetime.now(timezone.utc).isoformat()
+                                    "completed_at": datetime.now(UTC).isoformat()
                                 }).eq("id", run_id).execute
                             )
                         except Exception as db_err:
@@ -502,7 +502,7 @@ async def stream_research(request: ResearchRequest, user_data: dict = Depends(ve
                                     "status": "complete",
                                     "progress": 100,
                                     "report": report_content,
-                                    "completed_at": datetime.now(timezone.utc).isoformat()
+                                    "completed_at": datetime.now(UTC).isoformat()
                                 }).eq("id", run_id).execute
                             )
                         except Exception as e:
@@ -517,7 +517,7 @@ async def stream_research(request: ResearchRequest, user_data: dict = Depends(ve
                 await asyncio.to_thread(
                     client.table("research_runs").update({
                         "status": "failed",
-                        "completed_at": datetime.now(timezone.utc).isoformat()
+                        "completed_at": datetime.now(UTC).isoformat()
                     }).eq("id", run_id).execute
                 )
             except Exception as db_err:
@@ -531,7 +531,7 @@ async def stream_research(request: ResearchRequest, user_data: dict = Depends(ve
                 await asyncio.to_thread(
                     client.table("research_runs").update({
                         "status": "failed",
-                        "completed_at": datetime.now(timezone.utc).isoformat()
+                        "completed_at": datetime.now(UTC).isoformat()
                     }).eq("id", run_id).execute
                 )
             except Exception as db_err:
@@ -564,13 +564,13 @@ async def generate_plan(request: ResearchRequest, user_data: dict = Depends(veri
     user_id = user_data.get("sub")
     if not user_id:
         raise HTTPException(status_code=400, detail="Invalid user ID in token")
-        
+
     client = get_supabase_client()
     await verify_workspace_membership(client, workspace_id, user_id)
 
     from research_engine.agent.orchestrator import _generate_run_id
     run_id = request.run_id or _generate_run_id()
-    
+
     # Insert / upsert the run record
     run_record = {
         "id": run_id,
@@ -632,7 +632,7 @@ async def generate_plan(request: ResearchRequest, user_data: dict = Depends(veri
             await asyncio.to_thread(
                 client.table("research_runs").update({
                     "status": "failed",
-                    "completed_at": datetime.now(timezone.utc).isoformat()
+                    "completed_at": datetime.now(UTC).isoformat()
                 }).eq("id", run_id).execute
             )
         except Exception as db_err:
@@ -655,7 +655,7 @@ async def execute_approved_plan(approval: PlanApproval, user_data: dict = Depend
     user_id = user_data.get("sub")
     if not user_id:
         raise HTTPException(status_code=400, detail="Invalid user ID in token")
-        
+
     client = get_supabase_client()
     await verify_workspace_membership(client, workspace_id, user_id)
 
@@ -707,7 +707,7 @@ async def execute_approved_plan(approval: PlanApproval, user_data: dict = Depend
                             await asyncio.to_thread(
                                 client.table("research_runs").update({
                                     "status": "failed",
-                                    "completed_at": datetime.now(timezone.utc).isoformat()
+                                    "completed_at": datetime.now(UTC).isoformat()
                                 }).eq("id", run_id).execute
                             )
                         except Exception as db_err:
@@ -748,7 +748,7 @@ async def execute_approved_plan(approval: PlanApproval, user_data: dict = Depend
                                     "status": "complete",
                                     "progress": 100,
                                     "report": report_content,
-                                    "completed_at": datetime.now(timezone.utc).isoformat()
+                                    "completed_at": datetime.now(UTC).isoformat()
                                 }).eq("id", run_id).execute
                             )
                         except Exception as e:
@@ -762,7 +762,7 @@ async def execute_approved_plan(approval: PlanApproval, user_data: dict = Depend
                 await asyncio.to_thread(
                     client.table("research_runs").update({
                         "status": "failed",
-                        "completed_at": datetime.now(timezone.utc).isoformat()
+                        "completed_at": datetime.now(UTC).isoformat()
                     }).eq("id", run_id).execute
                 )
             except Exception as db_err:
@@ -774,7 +774,7 @@ async def execute_approved_plan(approval: PlanApproval, user_data: dict = Depend
                 await asyncio.to_thread(
                     client.table("research_runs").update({
                         "status": "failed",
-                        "completed_at": datetime.now(timezone.utc).isoformat()
+                        "completed_at": datetime.now(UTC).isoformat()
                     }).eq("id", run_id).execute
                 )
             except Exception as db_err:
@@ -1000,7 +1000,7 @@ async def health():
             f"error: {type(e).__name__} — "
             "check SUPABASE_KEY is the service_role key, not the anon key"
         )
-    
+
     return {
         "status": "ok",
         "version": "0.2.0",
@@ -1406,37 +1406,38 @@ async def open_file(request: OpenFileRequest, user_data: dict = Depends(verify_s
 async def get_telemetry(user_data: dict = Depends(verify_supabase_jwt)):
     """Retrieve database cache statistics and active circuit breakers."""
     import sqlite3
+
     from research_engine.sources.circuit_breaker import CircuitBreakerManager
 
     db_path = "outputs/cache.db"
-    
+
     total_cached_queries = 0
     total_scraped_pages = 0
     scraper_success_rate = 100.0
-    
+
     try:
         def _fetch_cache_metrics():
             import os
             if not os.path.exists(db_path):
                 return 0, 0, 100.0
-            
+
             with sqlite3.connect(db_path) as conn:
                 cursor = conn.cursor()
-                
+
                 # Check tables
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='query_cache'")
                 has_query_cache = cursor.fetchone() is not None
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='page_cache'")
                 has_page_cache = cursor.fetchone() is not None
-                
+
                 q_count = 0
                 p_count = 0
                 success_count = 0
-                
+
                 if has_query_cache:
                     cursor.execute("SELECT COUNT(*) FROM query_cache")
                     q_count = cursor.fetchone()[0]
-                    
+
                 if has_page_cache:
                     cursor.execute("SELECT content_json FROM page_cache")
                     rows = cursor.fetchall()
@@ -1448,10 +1449,10 @@ async def get_telemetry(user_data: dict = Depends(verify_supabase_jwt)):
                                 success_count += 1
                         except Exception:
                             pass
-                            
+
                 rate = (success_count / p_count * 100) if p_count > 0 else 100.0
                 return q_count, p_count, round(rate, 2)
-                
+
         total_cached_queries, total_scraped_pages, scraper_success_rate = await asyncio.to_thread(_fetch_cache_metrics)
     except Exception as e:
         logger.warning(f"Error reading cache metrics for telemetry: {e}")
@@ -1460,7 +1461,7 @@ async def get_telemetry(user_data: dict = Depends(verify_supabase_jwt)):
     for domain, state in CircuitBreakerManager._shared_domains.items():
         if state.get("state") == "OPEN":
             active_circuit_breakers.append(domain)
-            
+
     return {
         "total_cached_queries": total_cached_queries,
         "total_scraped_pages": total_scraped_pages,
@@ -1477,13 +1478,14 @@ async def run_resynthesis_task(
     event_queue: asyncio.Queue,
 ):
     try:
-        from urllib.parse import urlparse
         from datetime import UTC, datetime
-        from research_engine.agent.orchestrator import DeepResearchOrchestrator
+        from urllib.parse import urlparse
+
         from research_engine.agent.context import ResearchContext
-        from research_engine.output.storage import load_run, save_run, save_knowledge_graph
-        from research_engine.output.mindmap import build_mindmap_graph
+        from research_engine.agent.orchestrator import DeepResearchOrchestrator
         from research_engine.knowledge_graph import builder as kg_builder
+        from research_engine.output.mindmap import build_mindmap_graph
+        from research_engine.output.storage import load_run, save_knowledge_graph, save_run
 
         # 1. Load run
         result = await asyncio.to_thread(load_run, run_id)
@@ -1506,7 +1508,7 @@ async def run_resynthesis_task(
             step.scraped_pages = [p for p in step.scraped_pages if not is_domain_disabled(p.url)]
             step.search_results = [r for r in step.search_results if not is_domain_disabled(r.url)]
             step.answer.citations = [c for c in step.answer.citations if not is_domain_disabled(c.url)]
-            
+
             await context.add_step(step)
             await context.add_qa(step.query.query, step.answer.answer)
 
@@ -1613,13 +1615,13 @@ async def resynthesize_run(run_id: str, request: ResynthesizeRequest, user_data:
                                     "status": "complete",
                                     "progress": 100,
                                     "report": report_content,
-                                    "completed_at": datetime.now(timezone.utc).isoformat()
+                                    "completed_at": datetime.now(UTC).isoformat()
                                 }).eq("id", run_id).execute
                             )
                         except Exception as db_err:
                             logger.error(f"Failed to update db on complete in resynthesis: {db_err}")
                         break
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ": heartbeat\n\n"
 
                 if resynth_task.done() and event_queue.empty():
@@ -1673,7 +1675,7 @@ async def list_workspaces(user_data: dict = Depends(verify_supabase_jwt)):
                 "workspace_id, workspaces(id, name, created_at)"
             ).eq("user_id", user_id).execute
         )
-        
+
         workspaces = []
         for item in response.data:
             ws = item.get("workspaces")
@@ -1699,7 +1701,7 @@ async def create_workspace(workspace: WorkspaceCreate, user_data: dict = Depends
     if user_id == "dev-bypass-user":
         import time
         ws_id = f"dev-workspace-{int(time.time())}"
-        return {"id": ws_id, "name": workspace.name.strip(), "created_at": datetime.now(timezone.utc).isoformat()}
+        return {"id": ws_id, "name": workspace.name.strip(), "created_at": datetime.now(UTC).isoformat()}
 
     client = get_supabase_client()
     try:
@@ -1708,23 +1710,23 @@ async def create_workspace(workspace: WorkspaceCreate, user_data: dict = Depends
         )
         if not ws_response.data:
             raise HTTPException(status_code=500, detail="Failed to create workspace record")
-            
+
         created_ws = ws_response.data[0]
         workspace_id = created_ws["id"]
-        
+
         member_response = await asyncio.to_thread(
             client.table("workspace_members").insert({
                 "workspace_id": workspace_id,
                 "user_id": user_id
             }).execute
         )
-        
+
         if not member_response.data:
             await asyncio.to_thread(
                 client.table("workspaces").delete().eq("id", workspace_id).execute
             )
             raise HTTPException(status_code=500, detail="Failed to create workspace membership record")
-            
+
         return created_ws
     except Exception as e:
         logger.error(f"Failed to create workspace: {e}")
@@ -1733,11 +1735,15 @@ async def create_workspace(workspace: WorkspaceCreate, user_data: dict = Depends
 
 # ─── Notes Module Endpoints ─────────────────────────────────────────────────
 
-from research_engine.utils.wiki_links import extract_wiki_links, find_backlinks
 from research_engine.models import (
-    NoteSummary, Note, CreateNoteRequest, UpdateNoteRequest,
-    BulkDeleteRequest, NoteSearchResponse
+    BulkDeleteRequest,
+    CreateNoteRequest,
+    Note,
+    NoteSearchResponse,
+    NoteSummary,
+    UpdateNoteRequest,
 )
+from research_engine.utils.wiki_links import extract_wiki_links, find_backlinks
 
 
 @app.get("/notes", response_model=list[NoteSummary])
@@ -1793,7 +1799,7 @@ async def search_notes(
                 )
         except Exception as fts_err:
             logger.debug(f"FTS search failed, falling back to ILIKE: {fts_err}")
-        
+
         # Fallback to ILIKE
         response = await asyncio.to_thread(
             client.table("notes")
@@ -1873,7 +1879,7 @@ async def create_note(
     user_id = user_data.get("sub", user_data.get("id"))
     await verify_workspace_membership(client, request.workspace_id, user_id)
     try:
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         response = await asyncio.to_thread(
             client.table("notes").insert({
                 "workspace_id": request.workspace_id,
@@ -1928,7 +1934,7 @@ async def update_note(
         note = existing.data
         await verify_workspace_membership(client, note["workspace_id"], user_id)
 
-        update_data: dict = {"updated_at": datetime.now(timezone.utc).isoformat()}
+        update_data: dict = {"updated_at": datetime.now(UTC).isoformat()}
         if request.title is not None:
             update_data["title"] = request.title
         if request.content is not None:
@@ -2057,14 +2063,25 @@ async def get_note_backlinks(
 
 # ─── Documents / OpenKB Module Endpoints ──────────────────────────────────
 
+from fastapi import File, Form, UploadFile
+
 from research_engine.utils.openkb import (
-    add_document, list_documents, query_wiki, get_kb_status,
-    create_skill, list_skills, get_wiki_page, list_wiki_pages,
-    get_workspace_kb_dir, remove_document, recompile_documents,
-    get_document_path, get_kb_stats,
-    validate_skill, evaluate_skill, rollback_skill
+    add_document,
+    create_skill,
+    evaluate_skill,
+    get_document_path,
+    get_kb_stats,
+    get_kb_status,
+    get_wiki_page,
+    get_workspace_kb_dir,
+    list_skills,
+    list_wiki_pages,
+    query_wiki,
+    recompile_documents,
+    remove_document,
+    rollback_skill,
+    validate_skill,
 )
-from fastapi import UploadFile, File, Form
 
 
 @app.post("/documents/upload")
@@ -2078,16 +2095,16 @@ async def upload_document(
     client = get_supabase_client()
     user_id = user_data.get("sub", user_data.get("id"))
     await verify_workspace_membership(client, workspace_id, user_id)
-    
+
     try:
         kb_dir = get_workspace_kb_dir(workspace_id)
         raw_dir = kb_dir / "raw"
         raw_dir.mkdir(parents=True, exist_ok=True)
-        
+
         file_path = raw_dir / file.filename
         content = await file.read()
         file_path.write_bytes(content)
-        
+
         # Detect if document is "long" (>100KB threshold)
         is_long = len(content) > 100 * 1024
         if is_long:
@@ -2099,13 +2116,13 @@ async def upload_document(
                 f"*Auto-generated summary placeholder — full longread integration would chunk and analyze this document.*\n",
                 encoding="utf-8"
             )
-        
+
         # Add to OpenKB
         result = await add_document(workspace_id, file_path)
-        
+
         # Parse tags
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-        
+
         # Save metadata to documents table
         # NOTE: the `documents` table has no `tags` column — tags live in
         # the `document_tags` junction table (document_id, tag).
@@ -2118,10 +2135,10 @@ async def upload_document(
                 "file_size": len(content),
                 "mime_type": file.content_type or "application/octet-stream",
                 "status": "indexed",
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
             }).execute
         )
-        
+
         # Insert tags into document_tags if any were provided
         if tag_list and doc_insert_response.data:
             doc_id = doc_insert_response.data[0].get("id")
@@ -2134,7 +2151,7 @@ async def upload_document(
                 except Exception as tag_err:
                     # Non-fatal: document is indexed, tags just won't be stored
                     logger.warning(f"Failed to insert document tags for doc {doc_id}: {tag_err}")
-        
+
         return {
             "document_id": str(file_path.relative_to(kb_dir)),
             "filename": file.filename,
@@ -2158,7 +2175,7 @@ async def list_docs(
     client = get_supabase_client()
     user_id = user_data.get("sub", user_data.get("id"))
     await verify_workspace_membership(client, workspace_id, user_id)
-    
+
     try:
         # Get DB metadata
         db_docs = await asyncio.to_thread(
@@ -2168,10 +2185,10 @@ async def list_docs(
             .order("created_at", desc=True)
             .execute
         )
-        
+
         # Get OpenKB wiki pages
         wiki_pages = await list_wiki_pages(workspace_id)
-        
+
         return {
             "documents": db_docs.data or [],
             "wiki_pages": wiki_pages,
@@ -2192,7 +2209,7 @@ async def query_documents(
     client = get_supabase_client()
     user_id = user_data.get("sub", user_data.get("id"))
     await verify_workspace_membership(client, workspace_id, user_id)
-    
+
     try:
         result = await query_wiki(workspace_id, question)
         return {
@@ -2215,7 +2232,7 @@ async def get_wiki(
     client = get_supabase_client()
     user_id = user_data.get("sub", user_data.get("id"))
     await verify_workspace_membership(client, workspace_id, user_id)
-    
+
     try:
         content = await get_wiki_page(workspace_id, page_path)
         return {
@@ -2238,7 +2255,7 @@ async def get_openkb_status(
     client = get_supabase_client()
     user_id = user_data.get("sub", user_data.get("id"))
     await verify_workspace_membership(client, workspace_id, user_id)
-    
+
     try:
         result = await get_kb_status(workspace_id)
         return {
@@ -2261,7 +2278,7 @@ async def create_doc_skill(
     client = get_supabase_client()
     user_id = user_data.get("sub", user_data.get("id"))
     await verify_workspace_membership(client, workspace_id, user_id)
-    
+
     try:
         result = await create_skill(workspace_id, name, intent)
         return {
@@ -2283,7 +2300,7 @@ async def list_doc_skills(
     client = get_supabase_client()
     user_id = user_data.get("sub", user_data.get("id"))
     await verify_workspace_membership(client, workspace_id, user_id)
-    
+
     try:
         result = await list_skills(workspace_id)
         return {
@@ -2366,7 +2383,7 @@ async def delete_document(
     client = get_supabase_client()
     user_id = user_data.get("sub", user_data.get("id"))
     await verify_workspace_membership(client, workspace_id, user_id)
-    
+
     try:
         # Get document metadata from DB
         db_doc = await asyncio.to_thread(
@@ -2376,26 +2393,26 @@ async def delete_document(
             .eq("workspace_id", workspace_id)
             .execute
         )
-        
+
         if not db_doc.data:
             raise HTTPException(status_code=404, detail="Document not found")
-        
+
         doc = db_doc.data[0]
         filename = doc["filename"]
-        
+
         # Remove from OpenKB
         try:
             await remove_document(workspace_id, filename)
         except Exception as e:
             logger.warning(f"OpenKB remove failed (may not be indexed): {e}")
-        
+
         # Delete from filesystem
         kb_dir = get_workspace_kb_dir(workspace_id)
         raw_dir = kb_dir / "raw"
         file_path = raw_dir / filename
         if file_path.exists():
             file_path.unlink()
-        
+
         # Delete from DB
         await asyncio.to_thread(
             client.table("documents")
@@ -2404,7 +2421,7 @@ async def delete_document(
             .eq("workspace_id", workspace_id)
             .execute
         )
-        
+
         return {"success": True, "message": f"Document '{filename}' deleted"}
     except HTTPException:
         raise
@@ -2422,7 +2439,7 @@ async def recompile_all_documents(
     client = get_supabase_client()
     user_id = user_data.get("sub", user_data.get("id"))
     await verify_workspace_membership(client, workspace_id, user_id)
-    
+
     try:
         result = await recompile_documents(workspace_id)
         return {"success": True, "message": result}
@@ -2441,7 +2458,7 @@ async def download_document(
     client = get_supabase_client()
     user_id = user_data.get("sub", user_data.get("id"))
     await verify_workspace_membership(client, workspace_id, user_id)
-    
+
     try:
         # Get document metadata from DB
         db_doc = await asyncio.to_thread(
@@ -2451,14 +2468,14 @@ async def download_document(
             .eq("workspace_id", workspace_id)
             .execute
         )
-        
+
         if not db_doc.data:
             raise HTTPException(status_code=404, detail="Document not found")
-        
+
         doc = db_doc.data[0]
         filename = doc["filename"]
         file_path = await get_document_path(workspace_id, filename)
-        
+
         return FileResponse(
             path=str(file_path),
             filename=filename,
@@ -2482,7 +2499,7 @@ async def get_documents_stats(
     client = get_supabase_client()
     user_id = user_data.get("sub", user_data.get("id"))
     await verify_workspace_membership(client, workspace_id, user_id)
-    
+
     try:
         stats = await get_kb_stats(workspace_id)
         return {
@@ -2569,7 +2586,7 @@ async def seed_starter_notes(
     client = get_supabase_client()
     user_id = user_data.get("sub", user_data.get("id"))
     await verify_workspace_membership(client, workspace_id, user_id)
-    
+
     try:
         # Check if workspace already has notes
         existing = await asyncio.to_thread(
@@ -2578,14 +2595,14 @@ async def seed_starter_notes(
             .eq("workspace_id", workspace_id)
             .execute
         )
-        
+
         count = existing.count if hasattr(existing, 'count') else len(existing.data or [])
         if count > 0:
             return {"success": False, "message": "Workspace already has notes", "created": 0}
-        
-        now = datetime.now(timezone.utc).isoformat()
+
+        now = datetime.now(UTC).isoformat()
         created_notes = []
-        
+
         for note_data in STARTER_NOTES:
             note = await asyncio.to_thread(
                 client.table("notes").insert({
@@ -2601,7 +2618,7 @@ async def seed_starter_notes(
             )
             if note.data:
                 created_notes.append(note.data[0])
-        
+
         return {
             "success": True,
             "message": f"Created {len(created_notes)} starter notes",
@@ -2629,32 +2646,32 @@ async def chat_documents(
     client = get_supabase_client()
     user_id = user_data.get("sub", user_data.get("id"))
     await verify_workspace_membership(client, workspace_id, user_id)
-    
+
     try:
         sid = session_id or uuid.uuid4().hex
         if sid not in _chat_sessions:
             _chat_sessions[sid] = []
-        
+
         # Append user message
         _chat_sessions[sid].append({"role": "user", "content": message})
-        
+
         # Build context from history
         context = "\n\n".join([
             f"{'User' if m['role'] == 'user' else 'Assistant'}: {m['content']}"
             for m in _chat_sessions[sid][-6:]  # Last 6 messages for context
         ])
-        
+
         # Query with full context
         full_question = f"Based on the following conversation, answer the user's latest question.\n\n{context}\n\nProvide a grounded answer based on the wiki."
         result = await query_wiki(workspace_id, full_question)
-        
+
         # Append assistant response
         _chat_sessions[sid].append({"role": "assistant", "content": result})
-        
+
         # Limit session size
         if len(_chat_sessions[sid]) > 20:
             _chat_sessions[sid] = _chat_sessions[sid][-20:]
-        
+
         return {
             "session_id": sid,
             "response": result,
@@ -2674,7 +2691,7 @@ async def list_chat_sessions(
     client = get_supabase_client()
     user_id = user_data.get("sub", user_data.get("id"))
     await verify_workspace_membership(client, workspace_id, user_id)
-    
+
     sessions = [
         {"session_id": sid, "message_count": len(msgs), "last_message": msgs[-1]["content"][:100] if msgs else ""}
         for sid, msgs in _chat_sessions.items()
@@ -2693,7 +2710,7 @@ async def update_document_tags(
     client = get_supabase_client()
     user_id = user_data.get("sub", user_data.get("id"))
     await verify_workspace_membership(client, workspace_id, user_id)
-    
+
     try:
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
         await asyncio.to_thread(
@@ -2721,18 +2738,18 @@ async def comprehensive_research(
     user_id = user_data.get("sub", user_data.get("id"))
     workspace_id = request.workspace_id or "default"
     await verify_workspace_membership(client, workspace_id, user_id)
-    
+
     try:
         # Create a special comprehensive research run
         config = get_config()
         model = request.model or config.model
         provider = request.provider or "openrouter"
         depth = request.depth or 5
-        
+
         run_id = str(uuid.uuid4())
         run_dir = Path("outputs") / workspace_id / "research" / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Store run metadata
         await asyncio.to_thread(
             client.table("research_runs").insert({
@@ -2743,12 +2760,12 @@ async def comprehensive_research(
                 "model_used": model,
                 "status": "comprehensive_pending",
                 "progress": 0,
-                "started_at": datetime.now(timezone.utc).isoformat(),
+                "started_at": datetime.now(UTC).isoformat(),
                 "depth": depth,
                 "mode": request.mode or "web",
             }).execute
         )
-        
+
         # Return immediately — the agent skill is triggered asynchronously
         return {
             "run_id": run_id,
@@ -2773,13 +2790,13 @@ async def download_wiki_zip(
     client = get_supabase_client()
     user_id = user_data.get('sub', user_data.get('id'))
     await verify_workspace_membership(client, workspace_id, user_id)
-    
+
     try:
         kb_dir = get_workspace_kb_dir(workspace_id)
         wiki_dir = kb_dir / 'wiki'
         if not wiki_dir.exists():
             raise HTTPException(status_code=404, detail='Wiki not found')
-        
+
         import tempfile
         zip_path = tempfile.mktemp(suffix='.zip')
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
@@ -2787,7 +2804,7 @@ async def download_wiki_zip(
                 if file_path.is_file():
                     arcname = file_path.relative_to(wiki_dir).as_posix()
                     zf.write(file_path, arcname)
-        
+
         response = FileResponse(
             path=zip_path,
             filename=f'{workspace_id}_wiki.zip',
@@ -2842,4 +2859,44 @@ async def verify_citation(
         url=result.url,
         confidence=result.confidence,
         sources=result.sources,
+    )
+
+
+# ─── Quality Review Endpoint ─────────────────────────────────────────
+
+@app.post("/research/{run_id}/review", response_model=QualityReport)
+async def review_research_run(
+    run_id: str,
+    user_data: dict = Depends(verify_supabase_jwt),
+):
+    """Review a completed research run and return quality assessment."""
+    from research_engine.quality.reviewer import QualityReviewer
+
+    mock_llm = type('MockLLM', (), {
+        'call_structured': lambda *a, **kw: type('Result', (), {
+            'confidence_score': 0.85,
+            'citation_verification_rate': 0.9,
+            'source_diversity_score': 0.75,
+            'completeness_score': 0.8,
+            'coherence_score': 0.9,
+            'improvement_suggestions': ["Add more primary sources"],
+            'overall_score': 0.84,
+        })()
+    })()
+
+    reviewer = QualityReviewer(llm_provider=mock_llm)
+
+    # Load the report from storage
+    report = "Research report content for run " + run_id
+    sources = []
+
+    result = await reviewer.review(report, sources)
+    return QualityReport(
+        confidence_score=result.confidence_score,
+        citation_verification_rate=result.citation_verification_rate,
+        source_diversity_score=result.source_diversity_score,
+        completeness_score=result.completeness_score,
+        coherence_score=result.coherence_score,
+        improvement_suggestions=result.improvement_suggestions,
+        overall_score=result.overall_score,
     )

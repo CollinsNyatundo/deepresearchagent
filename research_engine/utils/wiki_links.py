@@ -1,10 +1,9 @@
 import re
-from typing import List
 
 WIKI_LINK_RE = re.compile(r'\[\[([^\]]+)\]\]')
 
 
-def extract_wiki_links(content: str) -> List[str]:
+def extract_wiki_links(content: str) -> list[str]:
     """Extract [[Title]] links from markdown content, excluding code blocks."""
     # Strip code blocks first
     text = re.sub(r'```[\s\S]*?```', '', content)
@@ -29,7 +28,7 @@ def parse_wiki_link(raw: str) -> dict:
     return {"type": "note", "target": raw, "raw": raw}
 
 
-def find_backlinks(workspace_id: str, target_title: str, client) -> List[dict]:
+def find_backlinks(workspace_id: str, target_title: str, client) -> list[dict]:
     """Find all notes in a workspace that link to a given title."""
     try:
         response = client.table("notes").select("id, title, content, updated_at") \

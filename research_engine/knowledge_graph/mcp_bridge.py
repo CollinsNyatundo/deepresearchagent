@@ -83,7 +83,7 @@ async def stop_mcp_server(run_id: str) -> None:
     try:
         proc.terminate()
         await asyncio.wait_for(proc.wait(), timeout=5)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
     except Exception as e:
         logger.warning(f"Error stopping MCP server for {run_id}: {e}")
@@ -186,7 +186,7 @@ async def query_graph(
             query_mode=request.mode,
         )
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("MCP server query timed out")
         return KGQueryResult(
             answer="Graph query timed out. Try a more specific question.",
@@ -203,6 +203,7 @@ async def query_graph(
 async def _cli_query_fallback(run_id: str, request: KGQueryRequest) -> KGQueryResult:
     """Fallback: use graphify CLI to query a graph.json directly."""
     import sys
+
     from research_engine.output.storage import DEFAULT_OUTPUT_DIR
 
     graph_path = DEFAULT_OUTPUT_DIR / run_id / "knowledge_graph.json"

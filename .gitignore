@@ -107,3 +107,12 @@ research/
 
 # Git worktrees
 .worktrees/
+
+# CodeGraph index (auto-generated, large)
+.codegraph/
+
+# Landing page experiments
+nightglass-landing/
+
+# Agent-generated debug/fix reports
+fix_orchestrator_report.txt

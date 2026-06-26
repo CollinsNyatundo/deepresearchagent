@@ -1,7 +1,6 @@
 import asyncio
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 OPENKB_BASE_DIR = Path("openkb")
 
@@ -104,7 +103,7 @@ async def get_kb_stats(workspace_id: str) -> dict:
     kb_dir = get_workspace_kb_dir(workspace_id)
     wiki_dir = kb_dir / "wiki"
     raw_dir = kb_dir / "raw"
-    
+
     stats = {
         "document_count": 0,
         "concept_count": 0,
@@ -112,10 +111,10 @@ async def get_kb_stats(workspace_id: str) -> dict:
         "summary_count": 0,
         "wiki_size_bytes": 0,
     }
-    
+
     if raw_dir.exists():
         stats["document_count"] = len(list(raw_dir.iterdir()))
-    
+
     if wiki_dir.exists():
         for item in wiki_dir.rglob("*.md"):
             stats["wiki_size_bytes"] += item.stat().st_size
@@ -126,7 +125,7 @@ async def get_kb_stats(workspace_id: str) -> dict:
                 stats["entity_count"] += 1
             elif rel.startswith("summaries/"):
                 stats["summary_count"] += 1
-    
+
     return stats
 
 async def get_wiki_page(workspace_id: str, page_path: str) -> str:
@@ -220,7 +219,7 @@ async def list_wiki_pages(workspace_id: str) -> list[dict]:
     wiki_dir = kb_dir / "wiki"
     if not wiki_dir.exists():
         return []
-    
+
     pages = []
     for item in wiki_dir.rglob("*.md"):
         rel = item.relative_to(wiki_dir).as_posix()

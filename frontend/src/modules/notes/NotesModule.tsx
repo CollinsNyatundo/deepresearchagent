@@ -11,7 +11,7 @@ import { useAuth } from '../../lib/authContext'
 import { WorkspaceSelector } from '../../components/Auth/WorkspaceSelector'
 import Layout from '../../components/layout/Layout'
 import { MarkdownPreview } from '../../components/notes/MarkdownPreview'
-import MoonPhaseWidget from '../../components/notes/MoonPhaseWidget'
+import CelestialWidget from '../../components/CelestialWidget'
 import { useVirtualList } from '../../hooks/useVirtualList'
 
 export default function NotesModule() {
@@ -283,6 +283,11 @@ export default function NotesModule() {
 
   const sidebarContent = (
     <div className="flex flex-col h-full p-3 gap-3">
+      {/* Celestial widget at top */}
+      <div className="flex flex-col items-center gap-1 pb-2 border-b border-white/[0.06]">
+        <CelestialWidget size={48} />
+      </div>
+
       <WorkspaceSelector selectedWorkspaceId={selectedWorkspaceId} onWorkspaceSelect={setSelectedWorkspaceId} />
 
       <button
@@ -376,10 +381,6 @@ export default function NotesModule() {
       </div>
 
       <div className="mt-auto pt-3 border-t border-white/[0.06] flex flex-col gap-2">
-        <div className="flex items-center gap-2 px-1">
-          <MoonPhaseWidget size={24} />
-          <span className="text-[10px] text-[#555]">Moon Phase</span>
-        </div>
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs text-[#555] truncate max-w-[140px]">{user?.email}</span>
           <button onClick={signOut} className="text-xs text-[#c45a5a] hover:text-[#e0e0e0] transition-colors duration-150 cursor-pointer bg-transparent border-none">Sign Out</button>

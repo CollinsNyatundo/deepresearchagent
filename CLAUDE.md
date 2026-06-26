@@ -173,7 +173,7 @@ When working on this branch, prioritize benchmarking with `tests/benchmark_laten
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **deepresearchagent** (4618 symbols, 11509 relationships, 161 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **deepresearchagent** (4948 symbols, 11877 relationships, 155 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

@@ -1,7 +1,7 @@
-"""Deep Research Orchestrator — main async research loop implementing DRE algorithm.
+"""Deep Research Orchestrator -- main async research loop implementing DRE algorithm.
 
 This is the heart of the engine. It coordinates:
-1. Plan creation → 2. Research loop (search → scrape → validate → synthesize → reflect) → 3. Report
+1. Plan creation -> 2. Research loop (search -> scrape -> validate -> synthesize -> reflect) -> 3. Report
 
 Key enhancements over original DRE:
 - SSE event emission for real-time frontend streaming (Phase 2)
@@ -12,7 +12,7 @@ Key enhancements over original DRE:
 - LLM-based result reranking for better page selection (Phase 3)
 - run_with_plan() properly uses user-approved plan, skipping generation (Phase 4)
 
-Runs at exhaustive depth (depth=5, ≤30 cycles) by default.
+Runs at exhaustive depth (depth=5, <=30 cycles) by default.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from rich.console import Console
@@ -33,13 +33,13 @@ from research_engine.agent import searcher as searcher_module
 from research_engine.agent.retry import reflective_retry
 from research_engine.config import AppConfig, get_config
 from research_engine.knowledge_graph import builder as kg_builder
-from research_engine.knowledge_graph import enricher as kg_enricher
 from research_engine.knowledge_graph import mcp_bridge as kg_mcp
 from research_engine.llm.provider import LLMProvider, validate_model_id
 from research_engine.models import (
     ConfidenceScore,
     PlanApproval,
-    ResearchEvent,
+    QueryIntent,
+    QueryIntentCategory,
     ResearchPlan,
     ResearchPlanReflection,
     ResearchRequest,
@@ -47,8 +47,6 @@ from research_engine.models import (
     ResearchState,
     ResearchStep,
     SearchQuery,
-    QueryIntent,
-    QueryIntentCategory,
 )
 from research_engine.output.mindmap import build_mindmap_graph
 from research_engine.output.storage import save_knowledge_graph, save_run
@@ -61,7 +59,7 @@ from research_engine.sources.web_search import get_search_provider
 logger = logging.getLogger(__name__)
 console = Console()
 
-# Confidence threshold — below this, we emit a low-confidence event and
+# Confidence threshold -- below this, we emit a low-confidence event and
 # consider additional research cycles for that query
 CONFIDENCE_THRESHOLD = 0.5
 
@@ -78,7 +76,7 @@ class DeepResearchOrchestrator:
     - Exhaustive depth=5 default (up to 30 research cycles)
     - SSE streaming via event_queue (Phase 2)
     - Protocol-H reflective retry via standalone retry.py (Phase 6)
-    - Confidence scoring per cycle — low confidence triggers retry (Phase 6)
+    - Confidence scoring per cycle -- low confidence triggers retry (Phase 6)
     - Content validation delegated to searcher module (Phase 6)
     - LLM reranking of search results (Phase 3)
     - run_with_plan() properly uses approved plan (Phase 4)
@@ -117,26 +115,30 @@ class DeepResearchOrchestrator:
                 rationale=f"Fallback due to classification error: {e}",
             )
 
-    # ═════════════════════════════════════════════════════════════════
+    # -----------------------------------------------------------------
     # Public API
-    # ═════════════════════════════════════════════════════════════════
+    # -----------------------------------------------------------------
 
     async def run(
         self,
         request: ResearchRequest,
         event_queue: asyncio.Queue | None = None,
+        run_id: str | None = None,
     ) -> ResearchResult:
         """Execute a complete deep research run, generating the plan internally.
 
         Args:
             request: The research request with query, model, depth, etc.
             event_queue: Optional async queue for SSE event emission.
+            run_id: Optional run_id to reuse.
 
         Returns:
             Complete ResearchResult with report, citations, trace, and mindmap.
         """
-        run_id = _generate_run_id()
-        started_at = datetime.now(timezone.utc)
+        if not run_id:
+            run_id = _generate_run_id()
+        self.current_run_id = run_id
+        started_at = datetime.now(UTC)
         await self.cache_manager.init_db()
 
         await self._emit(event_queue, ResearchState.INITIALIZING, {
@@ -145,7 +147,7 @@ class DeepResearchOrchestrator:
 
         model = self._resolve_model(request.model, provider=request.provider)
         if getattr(request, "mode", "web") == "github":
-            from research_engine.sources.github_search import GitHubSearchProvider, GitHubScraper
+            from research_engine.sources.github_search import GitHubScraper, GitHubSearchProvider
             search_provider = GitHubSearchProvider()
             scraper = GitHubScraper()
         else:
@@ -157,16 +159,16 @@ class DeepResearchOrchestrator:
 
         max_cycles = min(request.depth * 6, self.config.research.max_cycles)
 
-        console.print(f"\n[bold blue]🔬 Deep Research Agent[/bold blue]")
+        console.print("\n[bold blue]? Deep Research Agent[/bold blue]")
         console.print(f"   Query: [bold]{request.query}[/bold]")
         console.print(f"   Model: {model}")
         console.print(f"   Depth: {request.depth} (max {max_cycles} cycles)\n")
 
-        # ── Intent classification ──────────────────────────────────
+        # -- Intent classification ----------------------------------
         await self._emit(event_queue, ResearchState.CLASSIFYING_INTENT, {
             "message": "Analyzing query intent...",
         })
-        console.print("[yellow]🔍 Analyzing query intent...[/yellow]")
+        console.print("[yellow]? Analyzing query intent...[/yellow]")
         intent = await self._classify_intent(request.query, model, provider=request.provider)
         console.print(f"   Category: [bold cyan]{intent.category.value}[/bold cyan]")
         console.print(f"   Rationale: {intent.rationale}")
@@ -176,7 +178,7 @@ class DeepResearchOrchestrator:
             console.print(f"   Avoid domains: {intent.avoid_domains}")
         await self._emit_thinking(event_queue, f"Intent Classification Category: {intent.category.value}\nRationale: {intent.rationale}")
 
-        # ── Plan generation ────────────────────────────────────────
+        # -- Plan generation ----------------------------------------
         if intent.steps_override:
             console.print(f"   Using intent-based plan steps override: {len(intent.steps_override)} steps")
             plan = ResearchPlan(steps=intent.steps_override)
@@ -184,13 +186,13 @@ class DeepResearchOrchestrator:
             await self._emit(event_queue, ResearchState.PLANNING, {
                 "message": "Creating research plan...",
             })
-            console.print("[yellow]📋 Creating research plan...[/yellow]")
+            console.print("[yellow]? Creating research plan...[/yellow]")
             plan = await planner_module.create_plan(
                 request.query, llm=self.llm, model=model, provider=request.provider
             )
         await self._emit_thinking(event_queue, "Created Research Plan Steps:\n" + "\n".join(f"- {s}" for s in plan.steps))
 
-        # ── Query decomposition ────────────────────────────────────
+        # -- Query decomposition ------------------------------------
         if intent.sub_queries:
             console.print(f"   Using intent-based sub-queries override: {intent.sub_queries}")
             sub_queries = intent.sub_queries
@@ -248,13 +250,14 @@ class DeepResearchOrchestrator:
         Returns:
             Complete ResearchResult.
         """
-        run_id = _generate_run_id()
-        started_at = datetime.now(timezone.utc)
+        run_id = approval.run_id or _generate_run_id()
+        self.current_run_id = run_id
+        started_at = datetime.now(UTC)
         await self.cache_manager.init_db()
 
         model = self._resolve_model(approval.model, provider=approval.provider)
         if getattr(approval, "mode", "web") == "github":
-            from research_engine.sources.github_search import GitHubSearchProvider, GitHubScraper
+            from research_engine.sources.github_search import GitHubScraper, GitHubSearchProvider
             search_provider = GitHubSearchProvider()
             scraper = GitHubScraper()
         else:
@@ -266,16 +269,16 @@ class DeepResearchOrchestrator:
 
         max_cycles = min(approval.depth * 6, self.config.research.max_cycles)
 
-        console.print(f"\n[bold blue]🔬 Deep Research Agent (Pre-Approved Plan)[/bold blue]")
+        console.print("\n[bold blue]? Deep Research Agent (Pre-Approved Plan)[/bold blue]")
         console.print(f"   Query: [bold]{approval.query}[/bold]")
         console.print(f"   Steps: {len(approval.plan.steps)} (user-approved)")
         console.print(f"   Model: {model}\n")
 
-        # ── Intent classification ──────────────────────────────────
+        # -- Intent classification ----------------------------------
         await self._emit(event_queue, ResearchState.CLASSIFYING_INTENT, {
             "message": "Analyzing query intent...",
         })
-        console.print("[yellow]🔍 Analyzing query intent...[/yellow]")
+        console.print("[yellow]? Analyzing query intent...[/yellow]")
         intent = await self._classify_intent(approval.query, model, provider=approval.provider)
         console.print(f"   Category: [bold cyan]{intent.category.value}[/bold cyan]")
         console.print(f"   Rationale: {intent.rationale}")
@@ -291,11 +294,11 @@ class DeepResearchOrchestrator:
             "plan_source": "user_approved",
         })
 
-        # Use the user's approved plan directly — NO plan generation
+        # Use the user's approved plan directly -- NO plan generation
         plan = approval.plan
         sub_queries = approval.sub_queries or [approval.query]
-        await self._emit_thinking(event_queue, f"Using user-approved plan steps:\n" + "\n".join(f"- {s}" for s in plan.steps))
-        await self._emit_thinking(event_queue, f"Using user-approved sub-queries:\n" + "\n".join(f"- {q}" for q in sub_queries))
+        await self._emit_thinking(event_queue, "Using user-approved plan steps:\n" + "\n".join(f"- {s}" for s in plan.steps))
+        await self._emit_thinking(event_queue, "Using user-approved sub-queries:\n" + "\n".join(f"- {q}" for q in sub_queries))
 
         await self._emit(event_queue, ResearchState.PLAN_READY, {
             "plan": {"steps": plan.steps},
@@ -336,9 +339,9 @@ class DeepResearchOrchestrator:
             intent=intent,
         )
 
-    # ═════════════════════════════════════════════════════════════════
+    # -----------------------------------------------------------------
     # Core Research Loop
-    # ═════════════════════════════════════════════════════════════════
+    # -----------------------------------------------------------------
 
     async def _execute_research_loop(
         self,
@@ -416,7 +419,7 @@ class DeepResearchOrchestrator:
                                 llm=self.llm, model=model, provider=request.provider,
                             )
                             step.plan_updated = True
-                            console.print(f"   [yellow]📝 Plan updated at cycle {cycle + 1}[/yellow]")
+                            console.print(f"   [yellow]? Plan updated at cycle {cycle + 1}[/yellow]")
 
                         await self._emit(event_queue, ResearchState.CYCLE_COMPLETE, {
                             "cycle": cycle + 1,
@@ -434,14 +437,14 @@ class DeepResearchOrchestrator:
                                 llm=self.llm, model=model, provider=request.provider,
                             )
                             step.progress = final_progress
-                            console.print(f"   [green]📊 Progress: {final_progress}%[/green]")
+                            console.print(f"   [green]? Progress: {final_progress}%[/green]")
                             await self._emit(event_queue, "progress", {
                                 "progress": final_progress, "cycle": cycle + 1,
                             })
 
                             if final_progress >= self.config.research.progress_threshold:
                                 console.print(
-                                    f"   [bold green]✓ Research threshold reached "
+                                    f"   [bold green]? Research threshold reached "
                                     f"({final_progress}%)[/bold green]"
                                 )
                                 break
@@ -451,7 +454,7 @@ class DeepResearchOrchestrator:
                             if max_cycles < absolute_max:
                                 max_cycles += 1
                                 progress.update(task, total=max_cycles)
-                                console.print(f"   [bold yellow]⚠ Confidence low, triggered additional research cycle. Total cycles: {max_cycles}[/bold yellow]")
+                                console.print(f"   [bold yellow]? Confidence low, triggered additional research cycle. Total cycles: {max_cycles}[/bold yellow]")
                                 await self._emit(event_queue, "message", {
                                     "message": f"Low confidence triggered additional research cycle (total {max_cycles})"
                                 })
@@ -460,7 +463,7 @@ class DeepResearchOrchestrator:
                         error_msg = f"Cycle {cycle + 1} failed: {type(e).__name__}: {e}"
                         logger.error(error_msg)
                         errors.append(error_msg)
-                        console.print(f"   [red]⚠ {error_msg}[/red]")
+                        console.print(f"   [red]? {error_msg}[/red]")
                         await self._emit(event_queue, ResearchState.ERROR, {
                             "cycle": cycle + 1, "error": error_msg,
                         })
@@ -475,16 +478,16 @@ class DeepResearchOrchestrator:
                 except Exception as close_err:
                     logger.error(f"Failed to close scraper: {close_err}")
 
-        # ── Generate report ────────────────────────────────────────
+        # -- Generate report ----------------------------------------
         await self._emit(event_queue, ResearchState.GENERATING_REPORT, {
             "message": "Writing final report...",
         })
-        console.print("\n[yellow]📝 Writing final report...[/yellow]")
+        console.print("\n[yellow]? Writing final report...[/yellow]")
         report = await self._generate_report(query, current_plan, context, model=model, provider=request.provider, event_queue=event_queue)
 
-        # ── Build result ───────────────────────────────────────────
+        # -- Build result -------------------------------------------
         all_citations = context.get_all_citations()
-        completed_at = datetime.now(timezone.utc)
+        completed_at = datetime.now(UTC)
 
         result = ResearchResult(
             run_id=run_id,
@@ -501,16 +504,16 @@ class DeepResearchOrchestrator:
             errors=errors,
         )
 
-        # ── Build mindmap and save ─────────────────────────────────
-        console.print("[yellow]🧠 Building mindmap...[/yellow]")
+        # -- Build mindmap and save ---------------------------------
+        console.print("[yellow]? Building mindmap...[/yellow]")
         mindmap = build_mindmap_graph(result)
-        console.print("[yellow]💾 Saving results...[/yellow]")
+        console.print("[yellow]? Saving results...[/yellow]")
         output_path = await save_run(result, mindmap)
 
-        # ── Strategy A + C: Build Knowledge Graph (if graphify enabled) ──
+        # -- Strategy A + C: Build Knowledge Graph (if graphify enabled) --
         if self.config.graphify.enabled:
             try:
-                console.print("[yellow]🕸 Building knowledge graph...[/yellow]")
+                console.print("[yellow]? Building knowledge graph...[/yellow]")
 
                 # Strategy C: collect ArXiv/PDF URLs from all scraped pages
                 scraped_urls: list[str] = [
@@ -553,17 +556,17 @@ class DeepResearchOrchestrator:
                     "graph_html_available": kg.graph_html_available,
                 })
                 console.print(
-                    f"   [bold cyan]✓ Knowledge graph ready![/bold cyan] "
+                    f"   [bold cyan]? Knowledge graph ready![/bold cyan] "
                     f"{len(kg.nodes)} nodes, {len(kg.edges)} edges, "
                     f"{len(kg.communities)} communities"
                 )
             except Exception as kg_err:
                 logger.error(f"Knowledge graph build failed: {kg_err}")
-                console.print(f"   [yellow]⚠ Knowledge graph unavailable: {kg_err}[/yellow]")
+                console.print(f"   [yellow]? Knowledge graph unavailable: {kg_err}[/yellow]")
 
         duration = (completed_at - started_at).total_seconds()
         console.print(
-            f"\n[bold green]✓ Research complete![/bold green]\n"
+            f"\n[bold green]? Research complete![/bold green]\n"
             f"   Cycles: {context.step_count}\n"
             f"   Citations: {len(all_citations)}\n"
             f"   Progress: {final_progress}%\n"
@@ -584,9 +587,9 @@ class DeepResearchOrchestrator:
 
         return result
 
-    # ═════════════════════════════════════════════════════════════════
+    # -----------------------------------------------------------------
     # Per-Cycle Logic
-    # ═════════════════════════════════════════════════════════════════
+    # -----------------------------------------------------------------
 
     async def _run_cycle(
         self,
@@ -601,7 +604,7 @@ class DeepResearchOrchestrator:
         event_queue: asyncio.Queue | None = None,
         intent: QueryIntent | None = None,
     ) -> ResearchStep:
-        """Execute a single research cycle: query → search → rerank → scrape → validate → synthesize.
+        """Execute a single research cycle: query -> search -> rerank -> scrape -> validate -> synthesize.
 
         Full Protocol-H pipeline:
         1. Generate search query
@@ -610,18 +613,18 @@ class DeepResearchOrchestrator:
         4. Scrape top pages
         5. Validate scraped content (filter junk)
         6. Synthesize answer
-        7. Assess confidence — retry with broader query if < threshold
+        7. Assess confidence -- retry with broader query if < threshold
         """
-        # ── Determine if context needs upgrade (adaptive context window) ──
+        # -- Determine if context needs upgrade (adaptive context window) --
         upgrade_context = False
         if cycle > 0 and context.get_trace():
             last_step = context.get_trace()[-1]
             if last_step.confidence_score is not None and last_step.confidence_score < 0.5:
                 upgrade_context = True
                 logger.info(f"Cycle {cycle + 1}: Low confidence detected in previous cycle (<0.5). Upgrading context window payload.")
-                console.print(f"   [yellow]⚡ Low confidence in previous cycle. Upgrading context parameters.[/yellow]")
+                console.print("   [yellow]? Low confidence in previous cycle. Upgrading context parameters.[/yellow]")
 
-        # ── Resolve search provider dynamically if not in github mode ────
+        # -- Resolve search provider dynamically if not in github mode ----
         cycle_search_provider = search_provider
         if getattr(request, "mode", "web") != "github":
             if not request.search_provider or request.search_provider in ("all", "aggregated", "multi"):
@@ -629,14 +632,14 @@ class DeepResearchOrchestrator:
                 routing_key = AgenticSearchRouter.classify_search_intent(intent)
                 cycle_search_provider = RoutedSearchProvider(routing_key, self.config.search)
 
-        # ── Generate search query ──────────────────────────────────
+        # -- Generate search query ----------------------------------
         query = await searcher_module.generate_query(
             topic, plan, context.get_history_text(), llm=self.llm, model=model, provider=request.provider
         )
-        console.print(f"   🔍 Query: {query.query}")
+        console.print(f"   ? Query: {query.query}")
         await self._emit_thinking(event_queue, f"Cycle {cycle + 1}: Generated optimal search query.\nQuery: {query.query}\nRationale: {query.rationale}")
 
-        # ── Search with reflective retry ───────────────────────────
+        # -- Search with reflective retry ---------------------------
         await self._emit(event_queue, ResearchState.SEARCHING, {
             "cycle": cycle + 1, "query": query.query,
         })
@@ -687,7 +690,7 @@ class DeepResearchOrchestrator:
                     "message": "Analyzing failure and retrying...",
                 })
 
-                # ── Reflective retry via standalone module ─────────────
+                # -- Reflective retry via standalone module -------------
                 correction = await reflective_retry(
                     error=e,
                     context={
@@ -702,7 +705,7 @@ class DeepResearchOrchestrator:
                 )
 
                 if correction.corrected_query and not correction.should_skip:
-                    console.print(f"   [yellow]🔄 Retry: {correction.corrected_query}[/yellow]")
+                    console.print(f"   [yellow]? Retry: {correction.corrected_query}[/yellow]")
                     query = SearchQuery(
                         query=correction.corrected_query,
                         rationale=f"Reflective retry: {correction.reasoning}",
@@ -728,7 +731,7 @@ class DeepResearchOrchestrator:
                 else:
                     logger.info(f"Reflective retry decided to skip cycle {cycle + 1}")
 
-        # ── Rerank search results ──────────────────────────────────
+        # -- Rerank search results ----------------------------------
         if search_results:
             if all(r.eval_rationale for r in search_results):
                 logger.info("Skipping batch reranking; using pointwise relevance scores to sort results.")
@@ -774,7 +777,7 @@ class DeepResearchOrchestrator:
             ]
         })
 
-        # ── Result validation via searcher module ──────────────────
+        # -- Result validation via searcher module ------------------
         await self._emit(event_queue, ResearchState.VALIDATING, {
             "cycle": cycle + 1,
             "pages_before": len(scraped_pages),
@@ -783,7 +786,7 @@ class DeepResearchOrchestrator:
         valid_pages = searcher_module.validate_scraped_content(scraped_pages)
 
         console.print(
-            f"   📄 Scraped {len(valid_pages)} valid pages "
+            f"   ? Scraped {len(valid_pages)} valid pages "
             f"({sum(p.content_length for p in valid_pages)} chars)"
         )
 
@@ -793,7 +796,7 @@ class DeepResearchOrchestrator:
             "pages_filtered": len(scraped_pages) - len(valid_pages),
         })
 
-        # ── Synthesize answer ──────────────────────────────────────
+        # -- Synthesize answer --------------------------------------
         await self._emit(event_queue, ResearchState.SYNTHESIZING, {
             "cycle": cycle + 1,
             "source_pages": len(valid_pages),
@@ -810,10 +813,10 @@ class DeepResearchOrchestrator:
                 topic, query, valid_pages, llm=self.llm, model=model, provider=request.provider
             )
 
-        console.print(f"   ✅ Answer: {len(answer.answer)} chars, {len(answer.citations)} citations")
+        console.print(f"   ? Answer: {len(answer.answer)} chars, {len(answer.citations)} citations")
         await self._emit_thinking(event_queue, f"Cycle {cycle + 1}: Synthesized answer.\nPreview:\n{answer.answer[:300]}...\nCitations generated: {len(answer.citations)}")
 
-        # ── Confidence scoring (Protocol-H pattern) ────────────────
+        # -- Confidence scoring (Protocol-H pattern) ----------------
         confidence = await self._assess_confidence(
             topic=topic,
             query=query.query,
@@ -832,14 +835,14 @@ class DeepResearchOrchestrator:
         })
         await self._emit_thinking(event_queue, f"Cycle {cycle + 1}: Assessed confidence.\nScore: {confidence.score:.2f}\nReasoning: {confidence.reasoning}")
 
-        # Low confidence → log warning (could trigger retry in future)
+        # Low confidence -> log warning (could trigger retry in future)
         if confidence.needs_more_research and confidence.score < CONFIDENCE_THRESHOLD:
             logger.warning(
-                f"Cycle {cycle + 1}: low confidence ({confidence.score:.2f}) — "
+                f"Cycle {cycle + 1}: low confidence ({confidence.score:.2f}) -- "
                 f"{confidence.reasoning}"
             )
             console.print(
-                f"   [yellow]⚠ Low confidence: {confidence.score:.2f} — "
+                f"   [yellow]? Low confidence: {confidence.score:.2f} -- "
                 f"{confidence.reasoning[:80]}[/yellow]"
             )
 
@@ -855,9 +858,9 @@ class DeepResearchOrchestrator:
             confidence_score=confidence.score,
         )
 
-    # ═════════════════════════════════════════════════════════════════
+    # -----------------------------------------------------------------
     # Protocol-H Confidence Scoring
-    # ═════════════════════════════════════════════════════════════════
+    # -----------------------------------------------------------------
 
     async def _assess_confidence(
         self,
@@ -898,13 +901,13 @@ class DeepResearchOrchestrator:
             logger.warning(f"Confidence scoring failed: {e}. Using default score.")
             return ConfidenceScore(
                 score=0.6,
-                reasoning="Confidence assessment failed — defaulting to moderate confidence",
+                reasoning="Confidence assessment failed -- defaulting to moderate confidence",
                 needs_more_research=False,
             )
 
-    # ═════════════════════════════════════════════════════════════════
+    # -----------------------------------------------------------------
     # Report Generation
-    # ═════════════════════════════════════════════════════════════════
+    # -----------------------------------------------------------------
 
     async def _generate_report(
         self,
@@ -939,12 +942,12 @@ class DeepResearchOrchestrator:
             logger.error(f"Report generation failed: {e}")
             return f"# Research Report: {topic}\n\n{context.get_history_text()}"
 
-    # ═════════════════════════════════════════════════════════════════
+    # -----------------------------------------------------------------
     # Helpers
-    # ═════════════════════════════════════════════════════════════════
+    # -----------------------------------------------------------------
 
     def _resolve_model(self, model: str | None, provider: str | None = None) -> str:
-        """Resolve model — per-request override or config default."""
+        """Resolve model -- per-request override or config default."""
         if model:
             return validate_model_id(model, provider=provider)
         return self.config.llm.default_model
@@ -956,15 +959,30 @@ class DeepResearchOrchestrator:
         data: dict[str, Any],
     ) -> None:
         """Emit a research event to the SSE queue (no-op if no queue)."""
+        event_name = event.value if isinstance(event, ResearchState) else event
+
+        current_run_id = getattr(self, "current_run_id", None)
+        if current_run_id:
+            try:
+                from research_engine.db.supabase.client import get_supabase_client
+                client = get_supabase_client()
+                channel_name = f"research_run:{current_run_id}"
+                client.channel(channel_name).send({
+                    "type": "broadcast",
+                    "event": event_name,
+                    "payload": data
+                })
+            except Exception as e:
+                logger.warning(f"Failed to broadcast via Supabase Realtime: {e}")
+
         if event_queue is None:
             return
 
-        event_name = event.value if isinstance(event, ResearchState) else event
         try:
             await event_queue.put({
                 "event": event_name,
                 "data": data,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             })
         except Exception as e:
             logger.warning(f"Failed to emit event '{event_name}': {e}")
@@ -977,7 +995,7 @@ class DeepResearchOrchestrator:
         """Stream rationale or thinking text to the event queue as thinking_chunk events."""
         if event_queue is None or not text:
             return
-        
+
         tagged = f"<thinking>\n{text}\n</thinking>\n\n"
         # Split into chunks of 40 characters
         chunk_size = 40
@@ -987,12 +1005,12 @@ class DeepResearchOrchestrator:
             await asyncio.sleep(0.005)
 
 
-# ═════════════════════════════════════════════════════════════════════
+# ---------------------------------------------------------------------
 # Utilities
-# ═════════════════════════════════════════════════════════════════════
+# ---------------------------------------------------------------------
 
 def _generate_run_id() -> str:
     """Generate a unique run ID with timestamp."""
-    now = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    now = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     short_id = uuid.uuid4().hex[:8]
     return f"{now}-{short_id}"

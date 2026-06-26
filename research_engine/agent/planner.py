@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 
-from research_engine.llm.provider import LLMProvider
 from research_engine.llm.prompts import (
     QUERY_DECOMPOSITION_TEMPLATE,
     RESEARCH_PLAN_REFLECTION_TEMPLATE,
@@ -12,6 +11,7 @@ from research_engine.llm.prompts import (
     RESEARCH_PLANNING_TEMPLATE,
     RESEARCH_PROGRESS_TEMPLATE,
 )
+from research_engine.llm.provider import LLMProvider
 from research_engine.models import (
     QueryDecomposition,
     ResearchPlan,

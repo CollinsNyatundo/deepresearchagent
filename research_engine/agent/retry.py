@@ -18,8 +18,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from research_engine.llm.provider import LLMProvider
 from research_engine.llm.prompts import REFLECTIVE_RETRY_TEMPLATE
+from research_engine.llm.provider import LLMProvider
 from research_engine.models import RetryCorrection
 
 logger = logging.getLogger(__name__)

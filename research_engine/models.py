@@ -530,3 +530,44 @@ class NoteSearchResponse(BaseModel):
     total: int
 
 
+# ─── Citation Verification ─────────────────────────────────────────
+
+class CitationVerificationRequest(BaseModel):
+    """Request to verify a citation."""
+
+    citation_text: str
+
+
+class CitationVerificationResponse(BaseModel):
+    """Response from citation verification."""
+
+    status: str  # verified, unverified, failed
+    found: bool
+    title: str = ""
+    authors: list[str] = []
+    year: int | None = None
+    doi: str = ""
+    url: str = ""
+    confidence: float = 0.0
+    sources: int = 0
+
+
+class QualityReport(BaseModel):
+    """Quality assessment of a research report."""
+
+    confidence_score: float = 0.0
+    citation_verification_rate: float = 0.0
+    source_diversity_score: float = 0.0
+    completeness_score: float = 0.0
+    coherence_score: float = 0.0
+    improvement_suggestions: list[str] = []
+    overall_score: float = 0.0
+
+
+class QualityReviewRequest(BaseModel):
+    """Request to review a research report."""
+
+    report: str
+    sources: list[dict] = []
+
+

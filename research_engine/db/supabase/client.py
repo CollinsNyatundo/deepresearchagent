@@ -1,8 +1,9 @@
-import os
-import json
 import base64
+import json
 import logging
-from supabase import create_client, Client
+import os
+
+from supabase import Client, create_client
 
 logger = logging.getLogger(__name__)
 

@@ -18,7 +18,6 @@ import asyncio
 import json
 import logging
 import shutil
-import sys
 import tempfile
 from pathlib import Path
 
@@ -185,24 +184,24 @@ async def _run_graphify(
     """
     logger.info(f"Running graphify build pipeline in-process for corpus: {corpus_dir}")
     try:
+
+        from graphify.analyze import god_nodes, suggest_questions, surprising_connections
         from graphify.build import build_from_json
         from graphify.cluster import cluster, score_all
-        from graphify.analyze import god_nodes, surprising_connections, suggest_questions
-        from graphify.report import generate
-        from graphify.export import to_json, to_html
         from graphify.detect import detect, save_manifest
+        from graphify.export import to_html, to_json
+        from graphify.report import generate
         from pydantic import BaseModel, Field
-        from typing import List
 
         if llm is None:
-            from research_engine.llm.provider import LLMProvider
             from research_engine.config import get_config
+            from research_engine.llm.provider import LLMProvider
             cfg = get_config()
             llm = LLMProvider(config=cfg.llm)
 
         # 1. Run detection
         detection = detect(corpus_dir)
-        
+
         # 2. Concept extraction using LLM
         extraction = {
             "nodes": [],
@@ -284,8 +283,8 @@ async def _run_graphify(
             confidence_score: float = Field(description="Score between 0.1 and 1.0")
 
         class GraphFragment(BaseModel):
-            nodes: List[ExtractedNode]
-            edges: List[ExtractedEdge]
+            nodes: list[ExtractedNode]
+            edges: list[ExtractedEdge]
 
         async def _extract_fragment(content: str, src_file: str, parent_id: str) -> dict:
             if not content or len(content.strip()) < 100:

@@ -242,7 +242,7 @@ class ExaSearch:
                     snippet = " ".join(highlights_list)
                 else:
                     snippet = r.get("text", "") or r.get("snippet", "")
-                
+
                 results.append(
                     SearchResult(
                         url=r.get("url", ""),

@@ -7,7 +7,7 @@ import json
 import logging
 import re
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from research_engine.models import ScrapedPage, SearchResult
@@ -77,7 +77,7 @@ class CacheManager:
         results_json, created_at_str = row
         try:
             created_at = datetime.fromisoformat(created_at_str)
-            age = datetime.now(timezone.utc) - created_at
+            age = datetime.now(UTC) - created_at
             if age.total_seconds() > ttl_hours * 3600:
                 logger.info(f"Query cache expired for: {query}")
                 return None
@@ -98,7 +98,7 @@ class CacheManager:
         def _set():
             data = [r.model_dump() for r in results]
             results_json = json.dumps(data)
-            created_at_str = datetime.now(timezone.utc).isoformat()
+            created_at_str = datetime.now(UTC).isoformat()
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute(
                     "INSERT OR REPLACE INTO query_cache (normalized_query, results_json, created_at) "
@@ -130,7 +130,7 @@ class CacheManager:
         content_json, created_at_str = row
         try:
             created_at = datetime.fromisoformat(created_at_str)
-            age = datetime.now(timezone.utc) - created_at
+            age = datetime.now(UTC) - created_at
             if age.total_seconds() > ttl_hours * 3600:
                 logger.info(f"Page cache expired for URL: {url}")
                 return None
@@ -149,7 +149,7 @@ class CacheManager:
 
         def _set():
             content_json = page.model_dump_json()
-            created_at_str = datetime.now(timezone.utc).isoformat()
+            created_at_str = datetime.now(UTC).isoformat()
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute(
                     "INSERT OR REPLACE INTO page_cache (url, content_json, created_at) VALUES (?, ?, ?)",

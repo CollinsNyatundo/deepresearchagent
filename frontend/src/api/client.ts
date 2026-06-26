@@ -23,6 +23,9 @@ import type {
   SkillResponse,
   SkillListResponse,
   WikiPageResponse,
+  CitationVerificationResponse,
+  CitationVerificationRequest,
+  QualityReport,
 } from '../types/api';
 
 
@@ -734,6 +737,26 @@ export const api = {
   downloadWikiZip: (workspaceId: string): string => {
     return `${BASE_URL}/documents/wiki/download?workspace_id=${encodeURIComponent(workspaceId)}`;
   },
+
+  verifyCitation: async (request: CitationVerificationRequest): Promise<CitationVerificationResponse> => {
+    const res = await fetch(`${BASE_URL}/citations/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+    return handleResponse<CitationVerificationResponse>(res);
+  },
+
+  getQualityReport: async (runId: string): Promise<QualityReport> => {
+    const res = await fetch(`${BASE_URL}/research/${runId}/review`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return handleResponse<QualityReport>(res);
+  },
 };
 
-
+// Named export aliases for components that import these directly
+export const verifyCitation = api.verifyCitation;
+export const getQualityReport = api.getQualityReport;
+export const setAuthToken = (token: string | null) => api.setToken(token);

@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from research_engine.config import SearchConfig
 from research_engine.models import QueryIntent, QueryIntentCategory, SearchResult
-from research_engine.sources.web_search import get_search_provider, SearchProvider
+from research_engine.sources.web_search import get_search_provider
 
 logger = logging.getLogger(__name__)
 

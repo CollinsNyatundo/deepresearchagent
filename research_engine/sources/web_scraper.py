@@ -40,9 +40,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from urllib.parse import urlparse
-from typing import Any
 from html.parser import HTMLParser
+from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -601,10 +601,11 @@ class WebScraper:
         # Included when tier is "dynamic", "stealthy", or "all"
         if availability.get("dynamic") and tier in ("dynamic", "stealthy", "all"):
             async def _dynamic_fetch(url: str, _timeout: float = timeout_s):
-                from scrapling.fetchers import DynamicFetcher
                 from unittest.mock import MagicMock
+
+                from scrapling.fetchers import DynamicFetcher
                 is_mocked = (
-                    hasattr(DynamicFetcher.async_fetch, "mock") or 
+                    hasattr(DynamicFetcher.async_fetch, "mock") or
                     isinstance(DynamicFetcher.async_fetch, MagicMock) or
                     "mock" in getattr(DynamicFetcher.async_fetch, "__name__", "").lower()
                 )
@@ -622,10 +623,11 @@ class WebScraper:
         # ── Tier 3: StealthyFetcher via patchright (stealth Chromium) ────────
         if availability.get("stealthy_patchright") and tier in ("stealthy", "all"):
             async def _stealthy_patchright_fetch(url: str, _timeout: float = timeout_s):
-                from scrapling.fetchers import StealthyFetcher
                 from unittest.mock import MagicMock
+
+                from scrapling.fetchers import StealthyFetcher
                 is_mocked = (
-                    hasattr(StealthyFetcher.async_fetch, "mock") or 
+                    hasattr(StealthyFetcher.async_fetch, "mock") or
                     isinstance(StealthyFetcher.async_fetch, MagicMock) or
                     "mock" in getattr(StealthyFetcher.async_fetch, "__name__", "").lower()
                 )
@@ -643,10 +645,11 @@ class WebScraper:
         # ── Tier 4: StealthyFetcher + Camoufox Firefox (required, max stealth) ───
         if availability.get("stealthy_camoufox") and tier in ("stealthy", "all"):
             async def _stealthy_camoufox_fetch(url: str, _timeout: float = timeout_s):
-                from scrapling.fetchers import StealthyFetcher
                 from unittest.mock import MagicMock
+
+                from scrapling.fetchers import StealthyFetcher
                 is_mocked = (
-                    hasattr(StealthyFetcher.async_fetch, "mock") or 
+                    hasattr(StealthyFetcher.async_fetch, "mock") or
                     isinstance(StealthyFetcher.async_fetch, MagicMock) or
                     "mock" in getattr(StealthyFetcher.async_fetch, "__name__", "").lower()
                 )

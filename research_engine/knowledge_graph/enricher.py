@@ -131,7 +131,7 @@ async def _graphify_add(url: str, papers_dir: Path) -> bool:
             return True
         logger.debug(f"graphify add failed ({proc.returncode}): {stderr.decode()[:200]}")
         return False
-    except (asyncio.TimeoutError, FileNotFoundError, Exception) as e:
+    except (TimeoutError, FileNotFoundError, Exception) as e:
         logger.debug(f"graphify add exception: {e}")
         return False
 

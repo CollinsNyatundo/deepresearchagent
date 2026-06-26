@@ -3,7 +3,7 @@ import { Suspense, lazy } from 'react'
 import { Toaster } from 'sonner'
 import { BackgroundProvider } from './hooks/useBackground'
 import { useAuth } from './lib/authContext'
-import { AuthModal } from './components/Auth/AuthModal'
+import LoginPrompt from './components/LoginPrompt'
 import CommandPalette from './components/CommandPalette'
 import TodoDemo from './components/TodoDemo'
 
@@ -30,21 +30,7 @@ export default function App() {
 
   if (!user) {
     return (
-      <div className="h-screen w-full bg-black relative">
-        <AuthModal />
-        <Toaster 
-          position="bottom-right" 
-          theme="dark" 
-          toastOptions={{
-            style: {
-              background: 'rgba(0,0,0,0.9)',
-              border: '1px solid rgba(255,255,255,0.06)',
-              color: '#e0e0e0',
-              backdropFilter: 'blur(6px) saturate(140%)',
-            },
-          }}
-        />
-      </div>
+      <LoginPrompt />
     )
   }
 

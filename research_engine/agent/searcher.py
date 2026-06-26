@@ -4,23 +4,23 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 
-from research_engine.llm.provider import LLMProvider
 from research_engine.llm.prompts import (
     SEARCH_ANSWER_GENERATION_TEMPLATE,
     SEARCH_QUERY_GENERATION_TEMPLATE,
 )
+from research_engine.llm.provider import LLMProvider
 from research_engine.models import (
     Citation,
+    QueryIntent,
+    RelevanceEvaluation,
     ResearchPlan,
     ScrapedPage,
     SearchAnswer,
     SearchQuery,
     SearchResult,
-    QueryIntent,
-    RelevanceEvaluation,
 )
 from research_engine.sources.web_scraper import WebScraper
 from research_engine.sources.web_search import SearchProvider
@@ -64,7 +64,6 @@ async def _evaluate_relevance(
 ) -> tuple[SearchResult, float, str]:
     """Pointwise relevance check for a single SearchResult snippet."""
     from research_engine.llm.prompts import POINTWISE_RELEVANCE_EVALUATION_TEMPLATE
-    from research_engine.models import RelevanceEvaluation
 
     # AutoPass if snippet is empty or too short
     if not result.snippet or len(result.snippet.strip()) < 20:
@@ -152,12 +151,12 @@ async def search_and_scrape(
             for r in search_results
         ]
         eval_results = await asyncio.gather(*tasks)
-        
+
         # Attach scores to SearchResult models
         for r, score, rationale in eval_results:
             r.relevance_score = score
             r.eval_rationale = rationale
-            
+
         passed_results = [r for r, score, _ in eval_results if score >= 0.7]
         logger.info(f"Relevance AutoEval: {len(passed_results)}/{len(search_results)} passed threshold (>=0.7)")
     else:
@@ -222,7 +221,7 @@ async def synthesize_answer(
             if not cit.domain and cit.url:
                 cit.domain = urlparse(cit.url).netloc
             if not cit.accessed_at:
-                cit.accessed_at = datetime.now(timezone.utc)
+                cit.accessed_at = datetime.now(UTC)
 
         logger.info(
             f"Synthesized answer ({len(answer.answer)} chars, "

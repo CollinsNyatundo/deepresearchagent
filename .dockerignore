@@ -76,3 +76,15 @@ ruff_output.txt
 # Documents/Documentation
 docs
 *.md
+
+# Frontend source code
+frontend/
+
+# Tests
+tests/
+
+# Research artifacts
+research/
+
+# Nightglass landing page
+nightglass-landing/

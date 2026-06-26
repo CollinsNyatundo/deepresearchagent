@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,7 @@ class CircuitBreakerManager:
         if state["state"] == "OPEN":
             last_fail = state["last_fail"]
             if last_fail:
-                elapsed = (datetime.now(timezone.utc) - last_fail).total_seconds()
+                elapsed = (datetime.now(UTC) - last_fail).total_seconds()
                 if elapsed >= state["cooldown"]:
                     logger.info(f"Circuit Breaker: Domain {domain} cooldown elapsed. Transitioning to HALF-OPEN.")
                     state["state"] = "HALF_OPEN"
@@ -71,7 +71,7 @@ class CircuitBreakerManager:
 
         if state["state"] != "CLOSED":
             logger.info(f"Circuit Breaker: Successful scrape on {domain}. Closing circuit.")
-        
+
         state["state"] = "CLOSED"
         state["fails"] = 0
         state["cooldown"] = self.default_cooldown
@@ -83,7 +83,7 @@ class CircuitBreakerManager:
         state = self._init_domain(domain)
 
         state["fails"] += 1
-        state["last_fail"] = datetime.now(timezone.utc)
+        state["last_fail"] = datetime.now(UTC)
 
         if state["state"] == "HALF_OPEN":
             # Failure in HALF-OPEN state trips circuit back to OPEN and doubles cooldown

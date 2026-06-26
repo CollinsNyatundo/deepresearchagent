@@ -10,7 +10,6 @@ for the entire result set to minimize latency.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from pydantic import BaseModel, Field
 
