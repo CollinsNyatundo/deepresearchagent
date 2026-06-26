@@ -30,10 +30,9 @@ CREATE INDEX idx_citation_verifications_doi ON citation_verifications(doi);
 -- 3. Enable Row-Level Security
 ALTER TABLE citation_verifications ENABLE ROW LEVEL SECURITY;
 
--- 4. RLS Policy: workspace isolation
--- Users can only access citation_verifications for workspaces they are members of
 CREATE POLICY workspace_isolation_citations ON citation_verifications
-    FOR ALL USING (
+    FOR ALL TO authenticated
+    USING (
         EXISTS (
             SELECT 1 FROM workspace_members
             WHERE workspace_members.workspace_id = citation_verifications.workspace_id

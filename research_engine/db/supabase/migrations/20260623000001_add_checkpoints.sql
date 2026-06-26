@@ -22,7 +22,8 @@ ALTER TABLE checkpoints ENABLE ROW LEVEL SECURITY;
 
 -- 4. RLS Policy: workspace isolation
 CREATE POLICY workspace_isolation_checkpoints ON checkpoints
-    FOR ALL USING (
+    FOR ALL TO authenticated
+    USING (
         EXISTS (
             SELECT 1 FROM workspace_members
             WHERE workspace_members.workspace_id = checkpoints.workspace_id
