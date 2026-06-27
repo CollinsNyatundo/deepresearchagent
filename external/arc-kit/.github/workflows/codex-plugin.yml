@@ -1,0 +1,55 @@
+name: Codex Plugin
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".agents/plugins/marketplace.json"
+      - ".github/workflows/codex-plugin.yml"
+      - "plugins/**"
+      - "scripts/converter.py"
+      - "src/arckit_cli/**"
+      - "tests/codex/**"
+      - "pyproject.toml"
+  pull_request:
+    paths:
+      - ".agents/plugins/marketplace.json"
+      - ".github/workflows/codex-plugin.yml"
+      - "plugins/**"
+      - "scripts/converter.py"
+      - "src/arckit_cli/**"
+      - "tests/codex/**"
+      - "pyproject.toml"
+
+jobs:
+  codex-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python test dependencies
+        run: python -m pip install -e . pytest pyyaml
+
+      # The extensions/arckit-codex/ extension is generated from plugins/arckit-claude (and
+      # the community overlays) by converter.py and is no longer tracked in git
+      # (see .gitignore "Generated distribution formats"). Regenerate it before
+      # the tests so a fresh checkout has the files the suite asserts against.
+      - name: Generate extension formats
+        run: python scripts/converter.py
+
+      - name: Check Codex hook syntax
+        run: node --check extensions/arckit-codex/hooks/arckit-codex-hook.mjs
+
+      - name: Check CLI syntax
+        run: python -m py_compile src/arckit_cli/__init__.py
+
+      - name: Run Codex plugin tests
+        run: python -m pytest tests/codex/test_codex_extension.py

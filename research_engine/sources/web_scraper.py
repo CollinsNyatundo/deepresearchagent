@@ -540,25 +540,36 @@ class WebScraper:
 
         # ── Tier 0a: Parallel AI Extract (if API key available) ─────────────────
         if self.config.parallel_api_key:
-            async def _parallel_fetch(url: str, _timeout: float = timeout_s):
-                headers = {
-                    "Authorization": f"Bearer {self.config.parallel_api_key}",
-                    "Content-Type": "application/json"
-                }
-                payload = {"url": url}
-                async with httpx.AsyncClient(timeout=_timeout) as client:
-                    resp = await client.post(
-                        "https://api.parallel.ai/v1/extract",
-                        json=payload,
-                        headers=headers
-                    )
-                    resp.raise_for_status()
-                    data = resp.json()
-                content = data.get("text", "") or data.get("content", "") or data.get("extracted_content", "")
-                title = data.get("title", "")
-                return MockResponse(status=200, text=content, title=title)
+            self._parallel_disabled = getattr(self, '_parallel_disabled', False)
+            if not self._parallel_disabled:
+                async def _parallel_fetch(url: str, _timeout: float = timeout_s):
+                    headers = {
+                        "Authorization": f"Bearer {self.config.parallel_api_key}",
+                        "Content-Type": "application/json"
+                    }
+                    payload = {"urls": [url]}
+                    async with httpx.AsyncClient(timeout=_timeout) as client:
+                        resp = await client.post(
+                            "https://api.parallel.ai/v1/extract",
+                            json=payload,
+                            headers=headers
+                        )
+                        if resp.status_code == 402:
+                            logger.warning("Parallel AI out of credits (402). Disabling for this session.")
+                            self._parallel_disabled = True
+                            raise httpx.HTTPStatusError(
+                                "Parallel AI: insufficient credit", request=resp.request, response=resp
+                            )
+                        resp.raise_for_status()
+                        data = resp.json()
+                    # Parallel returns results for multiple URLs
+                    results = data.get("results", []) or data.get("data", []) or [data]
+                    result = results[0] if results else data
+                    content = result.get("text", "") or result.get("content", "") or result.get("extracted_content", "")
+                    title = result.get("title", "")
+                    return MockResponse(status=200, text=content, title=title)
 
-            chain.append(("parallel_extract", _parallel_fetch))
+                chain.append(("parallel_extract", _parallel_fetch))
 
         # ── Tier 0b: Firecrawl Scrape (if API key available) ────────────────────
         if self.config.firecrawl_api_key:

@@ -65,6 +65,13 @@ export type ResearchRequest = {
   mode?: 'web' | 'github';
   workspace_id?: string;
   run_id?: string;
+  // NEW: Format taxonomy fields
+  format?: string;  // 'academic' | 'business' | 'technical' | 'product' | 'literature' | 'data'
+  length?: string;  // format-specific length
+  audience?: string;  // 'researcher' | 'executive' | 'cto' | 'pm' | etc.
+  options?: Record<string, any>;  // format-specific options
+  export_format?: string;  // 'markdown' | 'pdf' | 'docx' | 'latex'
+  skills?: string[];  // override auto-resolved skills
 };
 
 // ─── SSE Streaming Events (Phase 2) ────────────────────────────────
@@ -117,6 +124,13 @@ export type PlanApproval = {
   mode?: 'web' | 'github';
   workspace_id?: string;
   run_id?: string;
+  // NEW: Format taxonomy fields
+  format?: string;
+  length?: string;
+  audience?: string;
+  options?: Record<string, any>;
+  export_format?: string;
+  skills?: string[];
 };
 
 // ─── Protocol-H Patterns (Phase 6) ─────────────────────────────────
@@ -243,7 +257,62 @@ export type OpenFileRequest = {
 };
 
 
-// ─── Phase 1 Architectural Types ────────────────────────────────────
+// ─── Format Taxonomy Types (Slice 6) ─────────────────────────────────
+
+export type ResearchFormat = {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  length_count: number;
+  audience_count: number;
+};
+
+export type ResearchFormatListResponse = {
+  formats: ResearchFormat[];
+};
+
+export type ResearchFormatDetail = {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  lengths: string[];
+  audiences: string[];
+  word_counts: Record<string, [number, number]>;
+};
+
+export type ResearchLengthOption = {
+  id: string;
+  name: string;
+  word_count_min: number;
+  word_count_max: number;
+};
+
+export type ResearchLengthListResponse = {
+  lengths: ResearchLengthOption[];
+};
+
+export type ResearchAudienceOption = {
+  id: string;
+  name: string;
+  description: string;
+};
+
+export type ResearchAudienceListResponse = {
+  audiences: ResearchAudienceOption[];
+};
+
+export type ResearchSkill = {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+};
+
+export type ResearchSkillListResponse = {
+  skills: ResearchSkill[];
+};
 
 export type QueryIntentCategory = 'academic' | 'news' | 'technical' | 'general';
 

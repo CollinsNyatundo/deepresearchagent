@@ -1,0 +1,36 @@
+# ArcKit code ownership
+# https://docs.github.com/en/repositories/managing-your-repositories-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Domain maintainers are auto-requested for review when files in their
+# scope change. They are not required reviewers — the repository owner
+# remains the final approver.
+
+# Default — repo maintainer reviews everything not otherwise scoped.
+*                                              @tractorjuice
+
+# EU regulatory commands — community-maintained by @thomas-jardinet
+arckit-claude/commands/eu-*.md                 @thomas-jardinet @tractorjuice
+arckit-claude/templates/eu-*-template.md       @thomas-jardinet @tractorjuice
+.arckit/templates/eu-*-template.md             @thomas-jardinet @tractorjuice
+
+# French government commands — community-maintained by @thomas-jardinet
+arckit-claude/commands/fr-*.md                 @thomas-jardinet @tractorjuice
+arckit-claude/templates/fr-*-template.md       @thomas-jardinet @tractorjuice
+.arckit/templates/fr-*-template.md             @thomas-jardinet @tractorjuice
+
+# Austrian government commands — community-maintained by @gtonic (see #304, #320, #333)
+arckit-claude/commands/at-*.md                 @gtonic @tractorjuice
+arckit-claude/templates/at-*-template.md       @gtonic @tractorjuice
+.arckit/templates/at-*-template.md             @gtonic @tractorjuice
+
+# Canada Federal Overlay — community-contributed, maintained by @tractorjuice (recruiting Canadian federal domain co-maintainer; promotion to official-baseline gated on co-maintainer commitment)
+arckit-claude/commands/ca-*.md                 @tractorjuice
+arckit-claude/templates/ca-*-template.md       @tractorjuice
+.arckit/templates/ca-*-template.md             @tractorjuice
+docs/guides/ca-*.md                            @tractorjuice
+arckit-claude/docs/guides/ca-*.md              @tractorjuice
+
+# UAE Federal Overlay — community-contributed, maintained by @tractorjuice (recruiting UAE domain co-maintainer; promotion to official-baseline gated on co-maintainer commitment)
+arckit-claude/commands/uae-*.md                @tractorjuice
+arckit-claude/templates/uae-*-template.md      @tractorjuice
+.arckit/templates/uae-*-template.md            @tractorjuice

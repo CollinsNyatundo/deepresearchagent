@@ -1,0 +1,69 @@
+[project]
+name = "arckit-cli"
+version = "5.15.0"
+description = "ArcKit CLI - The Enterprise Architecture Governance Harness"
+requires-python = ">=3.11"
+dependencies = [
+    "typer",
+    "rich",
+    "httpx[socks]",
+    "platformdirs",
+    "readchar",
+    "truststore>=0.10.4",
+]
+authors = [{ name = "Your Name", email = "your.email@example.com" }]
+readme = "README.md"
+license = { text = "MIT" }
+keywords = [
+    "architecture",
+    "enterprise",
+    "governance",
+    "procurement",
+    "rfp",
+    "vendor-selection",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Documentation",
+    "Topic :: System :: Systems Administration",
+]
+
+[project.urls]
+Homepage = "https://github.com/tractorjuice/arc-kit"
+Documentation = "https://github.com/tractorjuice/arc-kit/blob/main/README.md"
+Repository = "https://github.com/tractorjuice/arc-kit"
+Issues = "https://github.com/tractorjuice/arc-kit/issues"
+
+[project.scripts]
+arckit = "arckit_cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/arckit_cli"]
+
+[tool.hatch.build.targets.wheel.shared-data]
+"scripts" = "share/arckit/scripts"
+".arckit" = "share/arckit/.arckit"
+# Distribute only the docs the CLI scaffolds (guides + the three named files),
+# NOT the whole docs/ tree — mapping the directory shipped BUSINESS-PLAN.md,
+# INVESTOR-REPORT.md, proposals/, articles/ and superpowers/ into the public
+# package, and also double-mapped DEPENDENCY-MATRIX.md (breaking the wheel build).
+"docs/guides" = "share/arckit/docs/guides"
+"docs/README.md" = "share/arckit/docs/README.md"
+"docs/DEPENDENCY-MATRIX.md" = "share/arckit/docs/DEPENDENCY-MATRIX.md"
+"docs/WORKFLOW-DIAGRAMS.md" = "share/arckit/docs/WORKFLOW-DIAGRAMS.md"
+"VERSION" = "share/arckit/VERSION"
+"CHANGELOG.md" = "share/arckit/CHANGELOG.md"
+"extensions/arckit-codex" = "share/arckit/extensions/arckit-codex"
+"extensions/arckit-opencode" = "share/arckit/extensions/arckit-opencode"
+"extensions/arckit-copilot" = "share/arckit/extensions/arckit-copilot"
+"extensions/arckit-vibe" = "share/arckit/extensions/arckit-vibe"

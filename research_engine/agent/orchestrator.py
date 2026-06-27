@@ -471,6 +471,10 @@ class DeepResearchOrchestrator:
                         continue
 
                     cycle += 1
+                    # Rate limit: add delay between cycles for providers with strict limits
+                    provider = request.provider or self.config.llm.provider
+                    if provider in ("groq", "nvidia") and cycle < max_cycles:
+                        await asyncio.sleep(2.0)
         finally:
             if hasattr(scraper, "close"):
                 try:
@@ -1010,7 +1014,5 @@ class DeepResearchOrchestrator:
 # ---------------------------------------------------------------------
 
 def _generate_run_id() -> str:
-    """Generate a unique run ID with timestamp."""
-    now = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    short_id = uuid.uuid4().hex[:8]
-    return f"{now}-{short_id}"
+    """Generate a unique run ID (valid UUID for database storage)."""
+    return str(uuid.uuid4())

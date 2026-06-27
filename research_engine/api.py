@@ -255,7 +255,13 @@ async def get_runs(workspace_id: str, user_data: dict = Depends(verify_supabase_
                 model_used=row.get("model_used") or "",
                 status=row.get("status") or "initializing",
                 progress=row.get("progress") or 0,
-                workspace_id=row["workspace_id"]
+                workspace_id=row["workspace_id"],
+                format=row.get("format"),
+                length=row.get("length"),
+                audience=row.get("audience"),
+                export_format=row.get("export_format"),
+                skills_used=row.get("skills_used") or [],
+                options=row.get("options") or {},
             ))
         return runs
     except Exception as e:
@@ -331,6 +337,12 @@ async def start_research(request: ResearchRequest, user_data: dict = Depends(ver
         "model_used": request.model or config.llm.default_model,
         "status": "initializing",
         "progress": 0,
+        "format": request.format,
+        "length": request.length,
+        "audience": request.audience,
+        "export_format": request.export_format,
+        "skills_used": request.skills or [],
+        "options": request.options,
     }
     try:
         await asyncio.to_thread(client.table("research_runs").upsert(run_record).execute)
@@ -423,6 +435,12 @@ async def stream_research(request: ResearchRequest, user_data: dict = Depends(ve
         "model_used": request.model or config.llm.default_model,
         "status": "initializing",
         "progress": 0,
+        "format": request.format,
+        "length": request.length,
+        "audience": request.audience,
+        "export_format": request.export_format,
+        "skills_used": request.skills or [],
+        "options": request.options,
     }
     try:
         await asyncio.to_thread(client.table("research_runs").upsert(run_record).execute)
@@ -579,6 +597,12 @@ async def generate_plan(request: ResearchRequest, user_data: dict = Depends(veri
         "model_used": request.model or config.llm.default_model,
         "status": "initializing",
         "progress": 0,
+        "format": request.format,
+        "length": request.length,
+        "audience": request.audience,
+        "export_format": request.export_format,
+        "skills_used": request.skills or [],
+        "options": request.options,
     }
     try:
         await asyncio.to_thread(client.table("research_runs").upsert(run_record).execute)
@@ -670,6 +694,12 @@ async def execute_approved_plan(approval: PlanApproval, user_data: dict = Depend
         "model_used": approval.model or config.llm.default_model,
         "status": "initializing",
         "progress": 0,
+        "format": approval.format,
+        "length": approval.length,
+        "audience": approval.audience,
+        "export_format": approval.export_format,
+        "skills_used": approval.skills or [],
+        "options": approval.options,
     }
     try:
         await asyncio.to_thread(client.table("research_runs").upsert(run_record).execute)
@@ -930,6 +960,163 @@ async def list_models():
             for name, model_id in groq_presets.items()
         ],
     }
+
+
+# ─── Research Format Taxonomy Endpoints (Slice 6) ──────────────────────────
+
+from research_engine.formats.registry import FormatRegistry
+
+@app.get("/research/formats")
+async def list_research_formats():
+    """List all available research output formats.
+
+    Returns metadata for each format including name, description, icon,
+    supported lengths, and audiences.
+    """
+    registry = FormatRegistry()
+    formats = []
+    for fmt_id in registry.list_formats():
+        info = registry.format_info(fmt_id)
+        formats.append({
+            "id": fmt_id,
+            "name": info["name"],
+            "description": info["description"],
+            "icon": info["icon"],
+            "length_count": len(info["lengths"]),
+            "audience_count": len(info["audiences"]),
+        })
+    return {"formats": formats}
+
+
+@app.get("/research/formats/{format_id}")
+async def get_research_format(format_id: str):
+    """Get detailed metadata for a specific research format.
+
+    Args:
+        format_id: Format ID (e.g. "academic", "business", "technical").
+
+    Returns:
+        Format metadata including lengths, audiences, and word count ranges.
+    """
+    registry = FormatRegistry()
+    try:
+        info = registry.format_info(format_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"Format '{format_id}' not found")
+
+    return {
+        "id": format_id,
+        "name": info["name"],
+        "description": info["description"],
+        "icon": info["icon"],
+        "lengths": info["lengths"],
+        "audiences": info["audiences"],
+        "word_counts": info["word_counts"],
+    }
+
+
+@app.get("/research/formats/{format_id}/lengths")
+async def get_research_format_lengths(format_id: str):
+    """Get length options for a specific research format.
+
+    Args:
+        format_id: Format ID.
+
+    Returns:
+        List of length options with word count ranges.
+    """
+    registry = FormatRegistry()
+    try:
+        info = registry.format_info(format_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"Format '{format_id}' not found")
+
+    lengths = []
+    for length_id in info["lengths"]:
+        word_min, word_max = info["word_counts"].get(length_id, (5000, 10000))
+        lengths.append({
+            "id": length_id,
+            "name": length_id.replace("_", " ").title(),
+            "word_count_min": word_min,
+            "word_count_max": word_max,
+        })
+    return {"lengths": lengths}
+
+
+@app.get("/research/formats/{format_id}/audiences")
+async def get_research_format_audiences(format_id: str):
+    """Get audience options for a specific research format.
+
+    Args:
+        format_id: Format ID.
+
+    Returns:
+        List of audience options with descriptions.
+    """
+    registry = FormatRegistry()
+    try:
+        info = registry.format_info(format_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"Format '{format_id}' not found")
+
+    # Audience descriptions (could be moved to registry metadata)
+    audience_desc = {
+        "researcher": "Academic researchers and scientists",
+        "student": "Graduate and undergraduate students",
+        "reviewer": "Peer reviewers and journal editors",
+        "executive": "C-suite executives and senior leaders",
+        "investor": "VCs, angels, and institutional investors",
+        "founder": "Startup founders and entrepreneurs",
+        "board": "Board members and advisory committees",
+        "cto": "Chief Technology Officers and VPs of Engineering",
+        "ai_engineer": "AI/ML engineers and researchers",
+        "dev": "Software developers and engineers",
+        "architect": "Enterprise and solution architects",
+        "pm": "Product managers and product owners",
+        "growth": "Growth marketers and growth PMs",
+        "analyst": "Business and data analysts",
+        "data_scientist": "Data scientists and ML researchers",
+        "grad_student": "Graduate students and PhD candidates",
+        "general": "General audience",
+    }
+
+    audiences = []
+    for audience_id in info["audiences"]:
+        audiences.append({
+            "id": audience_id,
+            "name": audience_id.replace("_", " ").title(),
+            "description": audience_desc.get(audience_id, ""),
+        })
+    return {"audiences": audiences}
+
+
+@app.get("/research/skills")
+async def list_research_skills():
+    """List all available research skills.
+
+    Returns skills categorized by domain (academic, business, technical, product, data, common).
+    """
+    # Placeholder: will be populated from SkillRegistry when implemented
+    skills = [
+        {"id": "citation_verifier", "name": "Citation Verifier", "category": "academic", "description": "Verify citations against CrossRef, OpenAlex, Semantic Scholar, arXiv"},
+        {"id": "paper_structurer", "name": "Paper Structurer", "category": "academic", "description": "Generate academic paper structure with chapters and sections"},
+        {"id": "bibliography_formatter", "name": "Bibliography Formatter", "category": "academic", "description": "Format bibliographies in APA, MLA, Chicago, IEEE"},
+        {"id": "swot_analyzer", "name": "SWOT Analyzer", "category": "business", "description": "Generate SWOT analysis with actionable recommendations"},
+        {"id": "pestle_analyzer", "name": "PESTLE Analyzer", "category": "business", "description": "Analyze macro environment across Political, Economic, Social, Technological, Legal, Environmental factors"},
+        {"id": "market_sizer", "name": "Market Sizer", "category": "business", "description": "Calculate TAM, SAM, SOM with top-down and bottom-up approaches"},
+        {"id": "competitor_profiler", "name": "Competitor Profiler", "category": "business", "description": "Analyze competitor strengths, weaknesses, and differentiation opportunities"},
+        {"id": "hld_generator", "name": "HLD Generator", "category": "technical", "description": "Generate high-level design documents with architecture diagrams"},
+        {"id": "risk_register", "name": "Risk Register", "category": "technical", "description": "Create comprehensive risk registers following HM Treasury Orange Book"},
+        {"id": "security_review", "name": "Security Review", "category": "technical", "description": "Conduct security reviews aligned with NCSC CAF and Cyber Essentials"},
+        {"id": "wardley_mapper", "name": "Wardley Mapper", "category": "technical", "description": "Generate Wardley Maps for strategic planning"},
+        {"id": "opportunity_solution_tree", "name": "Opportunity Solution Tree", "category": "product", "description": "Build Opportunity Solution Trees (Teresa Torres)"},
+        {"id": "assumption_mapper", "name": "Assumption Mapper", "category": "product", "description": "Identify and prioritize risky assumptions across Value, Usability, Viability, Feasibility"},
+        {"id": "prd_writer", "name": "PRD Writer", "category": "product", "description": "Write comprehensive product requirement documents"},
+        {"id": "web_searcher", "name": "Web Searcher", "category": "common", "description": "Search the web using DuckDuckGo, Exa, or other providers"},
+        {"id": "web_scraper", "name": "Web Scraper", "category": "common", "description": "Scrape web pages using Scrapling with tiered fallback"},
+        {"id": "synthesizer", "name": "Synthesizer", "category": "common", "description": "Synthesize research findings into coherent narratives"},
+    ]
+    return {"skills": skills}
 
 
 @app.get("/scraper/status")
@@ -2763,6 +2950,12 @@ async def comprehensive_research(
                 "started_at": datetime.now(UTC).isoformat(),
                 "depth": depth,
                 "mode": request.mode or "web",
+                "format": request.format,
+                "length": request.length,
+                "audience": request.audience,
+                "export_format": request.export_format,
+                "skills_used": request.skills or [],
+                "options": request.options,
             }).execute
         )
 

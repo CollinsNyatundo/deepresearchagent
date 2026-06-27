@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en" class="govuk-template">
+<head>
+    <meta charset="UTF-8">
+    <script>(function(){var t=localStorage.getItem('arckit-theme');if(t==='dark')document.documentElement.classList.add('dark-mode');else if(t==='light')document.documentElement.classList.add('light-mode');else if(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)document.documentElement.classList.add('dark-mode')})();</script>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="description" content="ArcKit contributors: open-source maintainers and community members improving the AI harness and enterprise architecture governance toolkit through code, issues, and feedback.">
+    <title>ArcKit Contributors | Open Source Architecture Governance</title>
+    <meta name="keywords" content="ArcKit contributors, open source community, enterprise architecture toolkit contributors, architecture governance open source">
+    <meta name="author" content="ArcKit">
+    <meta property="og:title" content="ArcKit Contributors | Open Source Architecture Governance">
+    <meta property="og:description" content="Meet the open-source maintainers and community members improving ArcKit through code contributions, issues, feature requests, and feedback.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://arckit.org/contributors.html">
+    <meta property="og:site_name" content="ArcKit">
+    <meta property="og:image" content="https://arckit.org/og-image.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="ArcKit Contributors | Open Source Architecture Governance">
+    <meta name="twitter:description" content="Meet the open-source maintainers and community members improving ArcKit through code contributions, issues, feature requests, and feedback.">
+    <meta name="twitter:image" content="https://arckit.org/og-image.png">
+    <link rel="canonical" href="https://arckit.org/contributors.html">
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">
+    <link rel="apple-touch-icon" sizes="192x192" href="assets/favicon-192.png">
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+    <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+
+    <!-- GOV.UK Frontend v5.13.0 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/govuk-frontend@5.13.0/dist/govuk/govuk-frontend.min.css" integrity="sha384-AceDY4oHkY81f+xCeKu8Quexo66/gUuQDs73S9k0dLlVZCL4YKg/pEJtw4dxL4wY" crossorigin="anonymous">
+    <link rel="stylesheet" href="theme.css?v=4.12.3">
+    <link rel="stylesheet" href="heroes.css?v=4.12.3">
+
+    <style>
+        body,
+        .govuk-template,
+        .govuk-template__body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                         Helvetica, Arial, sans-serif, "Apple Color Emoji",
+                         "Segoe UI Emoji", "Segoe UI Symbol" !important;
+        }
+
+        [class*="govuk-"] {
+            font-family: inherit;
+        }
+
+        /* Nav Bar */
+        .app-nav-bar {
+            background: #0B1F33;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            border-bottom: 1px solid #505a5f;
+        }
+
+        .app-nav-bar__inner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .app-nav-bar__list {
+            display: flex;
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .app-nav-bar__item a {
+            display: block;
+            padding: 0.75rem 1.25rem;
+            color: #ffffff;
+            text-decoration: none;
+            font-size: 0.9375rem;
+            font-weight: 700;
+            border-top: 3px solid transparent;
+            border-bottom: 3px solid transparent;
+        }
+
+        .app-nav-bar__item a:hover,
+        .app-nav-bar__item a:focus {
+            background: #1d1d1d;
+            border-bottom-color: #1d70b8;
+            color: #ffffff;
+        }
+
+        .app-nav-bar__item--active a {
+            border-bottom-color: #1d70b8;
+        }
+
+        .app-nav-bar__brand {
+            color: #ffffff;
+            font-size: 1.125rem;
+            font-weight: 700;
+            text-decoration: none;
+            padding: 0.75rem 1.25rem;
+            display: block;
+        }
+
+        .app-nav-bar__brand:hover,
+        .app-nav-bar__brand:focus {
+            color: #ffffff;
+            text-decoration: none;
+        }
+
+        .app-nav-bar__toggle {
+            display: none;
+            background: none;
+            border: none;
+            color: white;
+            font-size: 1.125rem;
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            font-weight: 700;
+        }
+
+        @media (max-width: 48em) {
+            .app-nav-bar__toggle { display: block; }
+            .app-nav-bar__list { display: none; flex-direction: column; width: 100%; }
+            .app-nav-bar__list--open { display: flex; }
+            .app-nav-bar__inner { flex-wrap: wrap; }
+            .app-nav-bar__item a { padding: 0.75rem 1rem; border-bottom: none; border-left: 3px solid transparent; }
+            .app-nav-bar__item a:hover,
+            .app-nav-bar__item a:focus { border-left-color: #1d70b8; border-bottom: none; }
+            .app-nav-bar__item--active a { border-left-color: #1d70b8; border-bottom: none; }
+        }
+
+        /* Contributor Cards */
+        .app-contributor-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+
+        .app-contributor-card {
+            background: #f3f2f1;
+            padding: 1.5rem;
+            border-top: 4px solid #b58900;
+        }
+
+        .app-contributor-card:hover {
+            background: #e8e6e3;
+        }
+
+        .app-contributor-card__header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .app-contributor-card__avatar {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: #b58900;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 1.25rem;
+            flex-shrink: 0;
+        }
+
+        .app-contributor-card__name {
+            font-size: 1.125rem;
+            font-weight: 700;
+            margin: 0;
+        }
+
+        .app-contributor-card__name a {
+            color: #0b0c0c;
+            text-decoration: none;
+        }
+
+        .app-contributor-card__name a:hover {
+            text-decoration: underline;
+        }
+
+        .app-contributor-card__role {
+            display: inline-block;
+            font-size: 0.6875rem;
+            padding: 0.125rem 0.5rem;
+            border-radius: 2px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 0.25rem;
+        }
+
+        .app-contributor-card__role--code {
+            background: #00703c;
+            color: white;
+        }
+
+        .app-contributor-card__role--feature {
+            background: #1d70b8;
+            color: white;
+        }
+
+        .app-contributor-card__role--bug {
+            background: #d4351c;
+            color: white;
+        }
+
+        .app-contributor-card__highlights {
+            list-style: none;
+            padding: 0;
+            margin: 0.75rem 0 0;
+        }
+
+        .app-contributor-card__highlights li {
+            font-size: 0.875rem;
+            color: #505a5f;
+            padding: 0.25rem 0;
+            padding-left: 1.25rem;
+            position: relative;
+        }
+
+        .app-contributor-card__highlights li::before {
+            content: '\2713';
+            position: absolute;
+            left: 0;
+            color: #00703c;
+            font-weight: 700;
+        }
+
+        /* Footer */
+        .app-footer {
+            background: #0b0c0c;
+            color: white;
+            padding: 2rem 0;
+            margin-top: 3rem;
+        }
+
+        .app-footer a { color: white; text-decoration: underline; }
+        .app-footer a:hover { color: #5694ca; }
+    </style>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "WebPage",
+                "@id": "https://arckit.org/contributors.html",
+                "name": "ArcKit Contributors | Open Source Architecture Governance",
+                "description": "ArcKit contributors: open-source maintainers and community members improving the AI harness and enterprise architecture governance toolkit through code, issues, and feedback.",
+                "isPartOf": { "@type": "WebSite", "name": "ArcKit", "url": "https://arckit.org" }
+            },
+            {
+                "@type": "BreadcrumbList",
+                "itemListElement": [
+                    { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://arckit.org/" },
+                    { "@type": "ListItem", "position": 2, "name": "Contributors", "item": "https://arckit.org/contributors.html" }
+                ]
+            }
+        ]
+    }
+    </script>
+</head>
+<body class="govuk-template__body">
+    <a class="govuk-skip-link" href="#main-content">Skip to main content</a>
+    <script>document.body.className += ' js-enabled' + ('noModule' in HTMLScriptElement.prototype ? ' govuk-frontend-supported' : '');</script>
+
+    <nav class="app-nav-bar" aria-label="Main navigation">
+        <div class="govuk-width-container app-nav-bar__inner">
+            <a href="index.html" class="app-nav-bar__brand">ArcKit</a>
+            <button class="app-nav-bar__toggle" aria-expanded="false" aria-controls="nav-menu" onclick="var l=document.getElementById('nav-menu');var o=l.classList.toggle('app-nav-bar__list--open');this.setAttribute('aria-expanded',o)">&#9776; Menu</button>
+            <ul class="app-nav-bar__list" id="nav-menu">
+                <li class="app-nav-bar__item"><a href="commands.html">AI Commands</a></li>
+                <li class="app-nav-bar__item"><a href="use-cases.html">Example Projects</a></li>
+                <li class="app-nav-bar__item"><a href="guides.html">Guides</a></li>
+                <li class="app-nav-bar__item"><a href="roles.html">Roles</a></li>
+                <li class="app-nav-bar__item"><a href="articles.html">Articles</a></li>
+                <li class="app-nav-bar__item"><a href="getting-started.html">Getting Started</a></li>
+                <li class="app-nav-bar__item app-nav-bar__item--active"><a href="contributors.html">Contributors</a></li>
+                <li class="app-nav-bar__item"><a href="https://tractorjuice.github.io/arckit-fde/">FDE</a></li>
+            </ul>
+            <div class="app-nav-bar__icons">
+                <a href="https://github.com/tractorjuice/arc-kit" class="app-icon-link" aria-label="GitHub repository" title="GitHub repository">
+                    <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                </a>
+                <a href="https://discord.gg/JqgjQSnD" target="_blank" rel="noopener" class="app-icon-link" aria-label="Discord community" title="Discord community">
+                    <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M13.545 2.907a13.227 13.227 0 0 0-3.257-1.011.05.05 0 0 0-.052.025c-.141.25-.297.577-.406.833a12.19 12.19 0 0 0-3.658 0 8.258 8.258 0 0 0-.412-.833.051.051 0 0 0-.052-.025c-1.125.194-2.22.534-3.257 1.011a.041.041 0 0 0-.021.018C.356 6.024-.213 9.047.066 12.032c.001.014.01.028.021.037a13.276 13.276 0 0 0 3.995 2.02.05.05 0 0 0 .056-.019c.308-.42.582-.863.818-1.329a.05.05 0 0 0-.01-.059.051.051 0 0 0-.018-.011 8.875 8.875 0 0 1-1.248-.595.05.05 0 0 1-.02-.066.051.051 0 0 1 .015-.019c.084-.063.168-.129.248-.195a.05.05 0 0 1 .051-.007c2.619 1.196 5.454 1.196 8.041 0a.052.052 0 0 1 .053.007c.08.066.164.132.248.195a.051.051 0 0 1-.004.085 8.254 8.254 0 0 1-1.249.594.05.05 0 0 0-.03.03.052.052 0 0 0 .003.041c.24.465.515.909.817 1.329a.05.05 0 0 0 .056.019 13.235 13.235 0 0 0 4.001-2.02.049.049 0 0 0 .021-.037c.334-3.451-.559-6.449-2.366-9.106a.034.034 0 0 0-.02-.019Zm-8.198 7.307c-.789 0-1.438-.724-1.438-1.612 0-.889.637-1.613 1.438-1.613.807 0 1.45.73 1.438 1.613 0 .888-.637 1.612-1.438 1.612Zm5.316 0c-.788 0-1.438-.724-1.438-1.612 0-.889.637-1.613 1.438-1.613.807 0 1.451.73 1.438 1.613 0 .888-.631 1.612-1.438 1.612Z"/></svg>
+                </a>
+                <button class="app-theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode" title="Toggle theme"></button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="app-page-hero app-page-hero--contributors">
+        <div class="govuk-width-container app-page-hero__content">
+            <span class="app-page-hero__stat">13 Open Source Contributors</span>
+            <h1 class="app-page-hero__title">ArcKit Contributors</h1>
+            <p class="app-page-hero__description">Meet the maintainers and community members improving ArcKit through code contributions, issues, feature requests, and feedback.</p>
+        </div>
+    </div>
+
+    <main class="govuk-main-wrapper" id="main-content" role="main">
+        <div class="govuk-width-container">
+            <a href="index.html" class="govuk-back-link govuk-!-margin-bottom-6">Back to ArcKit</a>
+
+            <p class="govuk-body-l">ArcKit is an open-source AI harness and enterprise architecture governance toolkit. This page recognises the people who help improve the codebase, command catalogue, documentation, and release quality.</p>
+
+            <!-- Code Contributors -->
+            <h2 class="govuk-heading-l">Code Contributors</h2>
+            <p class="govuk-body">These contributors have submitted code changes that were merged into ArcKit, directly improving the toolkit for everyone.</p>
+
+            <div class="app-contributor-grid">
+                <div class="app-contributor-card">
+                    <div class="app-contributor-card__header">
+                        <div class="app-contributor-card__avatar">U</div>
+                        <div>
+                            <p class="app-contributor-card__name"><a href="https://github.com/umag">@umag</a></p>
+                            <span class="app-contributor-card__role app-contributor-card__role--code">Code Contributor</span>
+                        </div>
+                    </div>
+                    <p class="govuk-body-s">First external code contributor to ArcKit. Fixed document generation issues and improved output quality across multiple commands.</p>
+                    <ul class="app-contributor-card__highlights">
+                        <li>Fixed stakeholder analysis generation</li>
+                        <li>Improved template formatting consistency</li>
+                        <li>Multiple merged pull requests</li>
+                    </ul>
+                </div>
+
+                <div class="app-contributor-card">
+                    <div class="app-contributor-card__header">
+                        <div class="app-contributor-card__avatar">D</div>
+                        <div>
+                            <p class="app-contributor-card__name"><a href="https://github.com/DavidROliverBA">@DavidROliverBA</a></p>
+                            <span class="app-contributor-card__role app-contributor-card__role--code">Code Contributor</span>
+                        </div>
+                    </div>
+                    <p class="govuk-body-s">Contributed improvements to business architecture commands and documentation quality enhancements.</p>
+                    <ul class="app-contributor-card__highlights">
+                        <li>Business architecture improvements</li>
+                        <li>Documentation quality enhancements</li>
+                    </ul>
+                </div>
+
+                <div class="app-contributor-card">
+                    <div class="app-contributor-card__header">
+                        <div class="app-contributor-card__avatar">A</div>
+                        <div>
+                            <p class="app-contributor-card__name"><a href="https://github.com/alefbt">@alefbt</a></p>
+                            <span class="app-contributor-card__role app-contributor-card__role--code">Code Contributor</span>
+                        </div>
+                    </div>
+                    <p class="govuk-body-s">Contributed cross-platform compatibility fixes ensuring ArcKit works reliably on Windows alongside macOS and Linux.</p>
+                    <ul class="app-contributor-card__highlights">
+                        <li>Windows compatibility fixes</li>
+                        <li>Cross-platform script improvements</li>
+                    </ul>
+                </div>
+
+                <div class="app-contributor-card">
+                    <div class="app-contributor-card__header">
+                        <div class="app-contributor-card__avatar">T</div>
+                        <div>
+                            <p class="app-contributor-card__name"><a href="https://github.com/thomas-jardinet">@thomas-jardinet</a></p>
+                            <span class="app-contributor-card__role app-contributor-card__role--code">Code Contributor</span>
+                            <span class="app-contributor-card__role app-contributor-card__role--feature">Domain Maintainer (EU &amp; FR)</span>
+                        </div>
+                    </div>
+                    <p class="govuk-body-s">Contributed 19 community-developed regulatory compliance commands covering EU regulations (GDPR, NIS2, AI Act, DORA, CRA, DSA, Data Act) and French government standards (SecNumCloud, ANSSI, EBIOS, CNIL, DINUM, PSSI, DR, IRN, and more). Domain maintainer for these commands via <code>.github/CODEOWNERS</code> — auto-requested for review on changes to <code>eu-*</code> / <code>fr-*</code> commands and templates. Largest single contribution to date.</p>
+                    <ul class="app-contributor-card__highlights">
+                        <li>7 EU regulatory compliance commands</li>
+                        <li>12 French government &amp; ANSSI commands</li>
+                        <li>Templates, quality checklists, and per-format converter outputs</li>
+                    </ul>
+                </div>
+
+                <div class="app-contributor-card">
+                    <div class="app-contributor-card__header">
+                        <div class="app-contributor-card__avatar">G</div>
+                        <div>
+                            <p class="app-contributor-card__name"><a href="https://github.com/gtonic">@gtonic</a></p>
+                            <span class="app-contributor-card__role app-contributor-card__role--code">Code Contributor</span>
+                            <span class="app-contributor-card__role app-contributor-card__role--feature">Domain Maintainer (AT)</span>
+                        </div>
+                    </div>
+                    <p class="govuk-body-s">Authored the original situation report that motivated a non-UK overlay and took on domain maintenance for the Austrian regulatory commands — DSG / DSGVO (Datenschutzbehörde, §§12–13 image processing, ELGA/GTelG, §96a ArbVG, age-14 consent), NISG 2024 (NIS2 transposition, GovCERT reporting, KSÖ), and BVergG 2018 public procurement (Oberschwellen/Unterschwellen, ANKÖ, Bestbieterprinzip, BVwG review). Verified and tightened citations beyond the initial seed.</p>
+                    <ul class="app-contributor-card__highlights">
+                        <li>3 Austrian government &amp; regulatory commands</li>
+                        <li>Templates and quality checklist sections</li>
+                        <li>Citation verification pass across all AT commands</li>
+                    </ul>
+                </div>
+
+                <div class="app-contributor-card">
+                    <div class="app-contributor-card__header">
+                        <div class="app-contributor-card__avatar">R</div>
+                        <div>
+                            <p class="app-contributor-card__name"><a href="https://github.com/royster70">@royster70</a></p>
+                            <span class="app-contributor-card__role app-contributor-card__role--code">Code Contributor</span>
+                            <span class="app-contributor-card__role app-contributor-card__role--feature">Domain Maintainer (AU)</span>
+                        </div>
+                    </div>
+                    <p class="govuk-body-s">Authored the Australian Federal / DISP-supplier overlay end-to-end against a real Australian SMB engagement (DISP Level 2 in progress, OFFICIAL:Sensitive). Validated all eight original commands across nine evaluation runs producing ~4,093 lines of compliance artefacts with a 25/25 scorecard pass and zero UK-framework leakage. Recipe topology, doc-type registrations (including the corrective inclusion of the CA regime that had been missing since v4.15.0), and converter outputs all verified before submission. Subsequently extended the federal overlay with cross-sector OT security and SOCI/CIRMP commands (#539), then authored ArcKit's first Australian <strong>sector</strong> overlay, <code>arckit-au-energy</code> (#549), layering AESCSF and energy-market compliance on the federal baseline with two public synthetic evaluation fixtures (an applicable DNSP case and a non-SOCI supplier negative case).</p>
+                    <ul class="app-contributor-card__highlights">
+                        <li>10 Australian Federal &amp; DISP-supplier commands (ASD Essential Eight, ISM, DTA DSS, Privacy Act 1988 PIA, OAIC NDB, PSPF, AI Assurance, DISP attestation, OT security, SOCI/CIRMP)</li>
+                        <li><code>arckit-au-energy</code> sector overlay — <code>au-aescsf</code> + <code>au-energy-compliance</code> commands and the <code>au-energy</code> recipe (22 targets), composing the <code>arckit-au</code> federal baseline</li>
+                        <li><code>au-federal</code> build recipe (35 targets, 9 build waves) + validation scorecards with reproducible mechanical-grep evidence</li>
+                    </ul>
+                </div>
+
+                <div class="app-contributor-card">
+                    <div class="app-contributor-card__header">
+                        <div class="app-contributor-card__avatar">E</div>
+                        <div>
+                            <p class="app-contributor-card__name"><a href="https://github.com/ErbolTakhirov">@ErbolTakhirov</a></p>
+                            <span class="app-contributor-card__role app-contributor-card__role--code">Code Contributor</span>
+                        </div>
+                    </div>
+                    <p class="govuk-body-s">Proposed and implemented <code>user_config</code> defaulting in command and agent Document Control instructions — wiring the existing <code>default_classification</code> plugin setting into the <code>[CLASSIFICATION]</code> field so artefacts pick up the user's configured default automatically (<a href="https://github.com/tractorjuice/arc-kit/pull/492" class="govuk-link">#492</a>, salvaged from <a href="https://github.com/tractorjuice/arc-kit/pull/396" class="govuk-link">#396</a>).</p>
+                    <ul class="app-contributor-card__highlights">
+                        <li><code>${user_config.default_classification}</code> default across 38 commands and 8 agents</li>
+                        <li>Preserved per-command fallback wording (OFFICIAL / PUBLIC / INTERNAL variants)</li>
+                    </ul>
+                </div>
+
+                <div class="app-contributor-card">
+                    <div class="app-contributor-card__header">
+                        <div class="app-contributor-card__avatar">C</div>
+                        <div>
+                            <p class="app-contributor-card__name"><a href="https://github.com/chrisns">@chrisns</a> &mdash; Chris Nesbitt-Smith</p>
+                            <span class="app-contributor-card__role app-contributor-card__role--code">Code Contributor</span>
+                        </div>
+                    </div>
+                    <p class="govuk-body-s">Corrected ArcKit's UK accessibility target from the superseded WCAG 2.1 AA to the current WCAG 2.2 AA across the <code>service-assessment</code> command (GDS Service Standard Point 5 evidence checks) and five core templates (<a href="https://github.com/tractorjuice/arc-kit/pull/542" class="govuk-link">#542</a>). Verified against current GOV.UK monitoring guidance and the Public Sector Bodies Accessibility (EU-Exit Amendment) Regulations 2022, and confirmed the French, Canadian, and Australian overlays were already correct so they were deliberately left unchanged.</p>
+                    <ul class="app-contributor-card__highlights">
+                        <li>WCAG 2.2 AA correction across <code>service-assessment</code> and 5 core templates</li>
+                        <li>Sourced against GOV.UK, legislation.gov.uk, and DWP accessibility guidance</li>
+                        <li>Jurisdictional overlays validated and correctly left unchanged</li>
+                    </ul>
+                </div>
+
+                <div class="app-contributor-card">
+                    <div class="app-contributor-card__header">
+                        <div class="app-contributor-card__avatar">M</div>
+                        <div>
+                            <p class="app-contributor-card__name"><a href="https://github.com/pacharanero">@pacharanero</a> &mdash; Dr Marcus Baw</p>
+                            <span class="app-contributor-card__role app-contributor-card__role--feature">Domain Maintainer (UK NHS) &mdash; proposed</span>
+                            <span class="app-contributor-card__role app-contributor-card__role--code">Spec Author (SAFETY.md)</span>
+                        </div>
+                    </div>
+                    <p class="govuk-body-s">Author of the <a href="https://github.com/pacharanero/SAFETY.md" class="govuk-link">SAFETY.md spec v2.0.0-draft</a> that the <code>arckit-uk-nhs</code> overlay adopts verbatim for NHS DCB0129 / DCB0160 file naming and YAML-frontmatter hazard log. Clinical informatician and developer at RCPCH (Royal College of Paediatrics and Child Health), openEHR, and NHS England; multiple prior iterations on machine-readable clinical-safety documentation (<a href="https://github.com/turva-uk/dcb0129-markdown" class="govuk-link">DCB0129 markdown</a> &rarr; <a href="https://github.com/turva-uk/dcb0129-template" class="govuk-link">DCB0129 templated</a> &rarr; SAFETY.md). Engaged on issue <a href="https://github.com/tractorjuice/arc-kit/issues/424" class="govuk-link">#424</a> with the offer to contribute and maintain the NHS clinical-safety overlay.</p>
+                    <ul class="app-contributor-card__highlights">
+                        <li>SAFETY.md spec v2.0.0-draft &mdash; convention-driven clinical-safety documentation standard adopted by the overlay</li>
+                        <li>3-file output convention (<code>SAFETY.md</code> / <code>SAFETY-CASE.md</code> / <code>HAZARD-LOG.md</code>) with YAML-frontmatter hazard structure</li>
+                        <li>DCB0129 1&ndash;5 severity / likelihood scoring scale and <code>open</code>&nbsp;/&nbsp;<code>mitigated</code>&nbsp;/&nbsp;<code>accepted</code>&nbsp;/&nbsp;<code>closed</code> status vocabulary</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Feature Requesters & Bug Reporters -->
+            <h2 class="govuk-heading-l govuk-!-margin-top-8">Feature Requesters &amp; Bug Reporters</h2>
+            <p class="govuk-body">These contributors identified improvements and issues that made ArcKit better. Feature requests and bug reports are vital contributions &mdash; they shape the roadmap and improve reliability.</p>
+
+            <div class="app-contributor-grid">
+                <div class="app-contributor-card">
+                    <div class="app-contributor-card__header">
+                        <div class="app-contributor-card__avatar">J</div>
+                        <div>
+                            <p class="app-contributor-card__name"><a href="https://github.com/johnfelipe">@johnfelipe</a></p>
+                            <span class="app-contributor-card__role app-contributor-card__role--feature">Feature Requester</span>
+                        </div>
+                    </div>
+                    <p class="govuk-body-s">Requested multi-AI support, helping drive ArcKit's expansion beyond Claude Code to Codex CLI, Gemini CLI, and OpenCode CLI.</p>
+                    <ul class="app-contributor-card__highlights">
+                        <li>Requested multi-AI assistant support</li>
+                        <li>Influenced the quad-distribution model</li>
+                    </ul>
+                </div>
+
+                <div class="app-contributor-card">
+                    <div class="app-contributor-card__header">
+                        <div class="app-contributor-card__avatar">B</div>
+                        <div>
+                            <p class="app-contributor-card__name"><a href="https://github.com/brettderry">@brettderry</a></p>
+                            <span class="app-contributor-card__role app-contributor-card__role--bug">Bug Reporter</span>
+                        </div>
+                    </div>
+                    <p class="govuk-body-s">Identified and reported issues with command execution, helping improve reliability and error handling.</p>
+                    <ul class="app-contributor-card__highlights">
+                        <li>Reported command execution issues</li>
+                        <li>Helped improve error handling</li>
+                    </ul>
+                </div>
+
+                <div class="app-contributor-card">
+                    <div class="app-contributor-card__header">
+                        <div class="app-contributor-card__avatar">E</div>
+                        <div>
+                            <p class="app-contributor-card__name"><a href="https://github.com/elasticdotventures">@elasticdotventures</a></p>
+                            <span class="app-contributor-card__role app-contributor-card__role--feature">Feature Requester</span>
+                        </div>
+                    </div>
+                    <p class="govuk-body-s">Suggested improvements to cloud research capabilities and integration patterns for enterprise workflows.</p>
+                    <ul class="app-contributor-card__highlights">
+                        <li>Cloud research improvement suggestions</li>
+                        <li>Enterprise workflow feedback</li>
+                    </ul>
+                </div>
+
+                <div class="app-contributor-card">
+                    <div class="app-contributor-card__header">
+                        <div class="app-contributor-card__avatar">A</div>
+                        <div>
+                            <p class="app-contributor-card__name"><a href="https://github.com/anyulled">@anyulled</a></p>
+                            <span class="app-contributor-card__role app-contributor-card__role--bug">Bug Reporter</span>
+                        </div>
+                    </div>
+                    <p class="govuk-body-s">Reported documentation and usability issues, contributing to a smoother onboarding experience for new users.</p>
+                    <ul class="app-contributor-card__highlights">
+                        <li>Reported documentation issues</li>
+                        <li>Improved onboarding experience</li>
+                    </ul>
+                </div>
+
+                <div class="app-contributor-card">
+                    <div class="app-contributor-card__header">
+                        <div class="app-contributor-card__avatar">B</div>
+                        <div>
+                            <p class="app-contributor-card__name"><a href="https://github.com/Benjamest">@Benjamest</a></p>
+                            <span class="app-contributor-card__role app-contributor-card__role--bug">Bug Reporter</span>
+                        </div>
+                    </div>
+                    <p class="govuk-body-s">Reported a malformed agent role definition error in generated Codex CLI <code>.toml</code> files (<a href="https://github.com/tractorjuice/arc-kit/issues/269" class="govuk-link">#269</a>), which was traced to a missing <code>name</code> field in the converter and fixed in v4.6.2.</p>
+                    <ul class="app-contributor-card__highlights">
+                        <li>Identified Codex agent TOML schema bug</li>
+                        <li>Clear repro steps with full error logs</li>
+                        <li>Fix shipped in v4.6.2</li>
+                    </ul>
+                </div>
+
+                <div class="app-contributor-card">
+                    <div class="app-contributor-card__header">
+                        <div class="app-contributor-card__avatar">J</div>
+                        <div>
+                            <p class="app-contributor-card__name"><a href="https://github.com/jonathan-moulds-sb">@jonathan-moulds-sb</a> &mdash; Jono Moulds</p>
+                            <span class="app-contributor-card__role app-contributor-card__role--bug">Bug Reporter</span>
+                        </div>
+                    </div>
+                    <p class="govuk-body-s">Reported that the secret-scanner hooks (<code>secret-file-scanner.mjs</code> / <code>secret-detection.mjs</code>) false-positived on code and IaC that <em>references</em> a secret rather than hardcoding it &mdash; e.g. <code>secret &#61; module.sm.secret_ids["x"]</code> (Terraform), <code>password &#61; var.db_password</code>, <code>api_key &#61; process.env.API_KEY</code> &mdash; blocking exactly the secure pattern the hook should encourage (<a href="https://github.com/tractorjuice/arc-kit/issues/590" class="govuk-link">#590</a>, fixed in <a href="https://github.com/tractorjuice/arc-kit/pull/591" class="govuk-link">#591</a>). Provided root-cause analysis, a minimal repro, a proposed reference-guard regex, and a verified before/after test matrix.</p>
+                    <ul class="app-contributor-card__highlights">
+                        <li>Pinpointed the over-broad <code>\S+</code> value match in the generic key-value rules</li>
+                        <li>Repro, proposed fix, and verified test table covering references vs. literals</li>
+                        <li>Motivated a provider-agnostic reference guard plus a cross-hook sync regression test</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Community Summary -->
+            <h2 class="govuk-heading-l govuk-!-margin-top-8">Community Impact</h2>
+            <p class="govuk-body">ArcKit has grown from a solo project into a community-driven toolkit. With 8 code contributors, 2 feature requesters, and 4 bug reporters, these 14 individuals have collectively shaped ArcKit through merged pull requests, feature ideas that influenced the roadmap, and bug reports that improved reliability. Their contributions span cross-platform compatibility, multi-AI support, business architecture improvements, documentation quality, plugin user-config wiring, secret-scanner accuracy, accessibility standards alignment, and EU / French / Austrian / Australian regulatory compliance coverage.</p>
+
+            <!-- Contributing CTA -->
+            <div class="govuk-inset-text govuk-!-margin-top-6">
+                <h3 class="govuk-heading-m">Want to contribute?</h3>
+                <p class="govuk-body">ArcKit welcomes contributions of all kinds &mdash; code, documentation, feature requests, bug reports, and feedback. Every contribution helps make enterprise architecture governance more accessible.</p>
+                <p class="govuk-body"><a href="https://github.com/tractorjuice/arc-kit" class="govuk-link">Visit the ArcKit GitHub repository</a> to get started.</p>
+            </div>
+        </div>
+    </main>
+
+    <footer class="app-footer">
+        <div class="govuk-width-container">
+            <p class="govuk-body-s"><a href="index.html" class="govuk-link">Back to ArcKit</a> | <a href="https://github.com/tractorjuice/arc-kit" class="govuk-link">GitHub</a> | MIT License</p>
+        </div>
+    </footer>
+
+    <!-- GOV.UK Frontend JavaScript -->
+    <script type="module" src="https://cdn.jsdelivr.net/npm/govuk-frontend@5.13.0/dist/govuk/govuk-frontend.min.js" integrity="sha384-DwGEYeDIkSBDH4+n4Z+tY7m0/hKLvETQmD6glhDiHn0lFo3hffImqh39zfNvHVrd" crossorigin="anonymous"></script>
+    <script type="module">
+        import { initAll } from 'https://cdn.jsdelivr.net/npm/govuk-frontend@5.13.0/dist/govuk/govuk-frontend.min.js'
+        initAll()
+    </script>
+<script src="theme.js"></script>
+</body>
+</html>

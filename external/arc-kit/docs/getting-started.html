@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en" class="govuk-template">
+<head>
+    <meta charset="UTF-8">
+    <script>(function(){var t=localStorage.getItem('arckit-theme');if(t==='dark')document.documentElement.classList.add('dark-mode');else if(t==='light')document.documentElement.classList.add('light-mode');else if(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)document.documentElement.classList.add('dark-mode')})();</script>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="description" content="Install the ArcKit AI harness in 5 minutes for Claude Code, Codex CLI, Gemini CLI, OpenCode CLI, GitHub Copilot, or Mistral Vibe, then create governed architecture artifacts.">
+    <meta name="keywords" content="ArcKit getting started, install ArcKit, Claude Code plugin, Gemini CLI extension, Codex CLI, OpenCode CLI, GitHub Copilot, Mistral Vibe, architecture governance setup, quick start guide">
+    <meta name="author" content="ArcKit">
+    <title>Install ArcKit | Getting Started Guide</title>
+    <meta property="og:title" content="Install ArcKit | Getting Started Guide">
+    <meta property="og:description" content="Install the ArcKit AI harness for Claude Code, Codex CLI, Gemini CLI, OpenCode CLI, GitHub Copilot, or Mistral Vibe and create governed architecture artifacts.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://arckit.org/getting-started.html">
+    <meta property="og:site_name" content="ArcKit">
+    <meta property="og:image" content="https://arckit.org/og-image.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Install ArcKit | Getting Started Guide">
+    <meta name="twitter:description" content="Install the ArcKit AI harness for Claude Code, Codex CLI, Gemini CLI, OpenCode CLI, GitHub Copilot, or Mistral Vibe and create governed architecture artifacts.">
+    <meta name="twitter:image" content="https://arckit.org/og-image.png">
+    <link rel="canonical" href="https://arckit.org/getting-started.html">
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">
+    <link rel="apple-touch-icon" sizes="192x192" href="assets/favicon-192.png">
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+    <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
+
+    <!-- GOV.UK Frontend v5.13.0 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/govuk-frontend@5.13.0/dist/govuk/govuk-frontend.min.css" integrity="sha384-AceDY4oHkY81f+xCeKu8Quexo66/gUuQDs73S9k0dLlVZCL4YKg/pEJtw4dxL4wY" crossorigin="anonymous">
+    <link rel="stylesheet" href="theme.css?v=4.12.3">
+    <link rel="stylesheet" href="heroes.css?v=4.12.3">
+
+    <style>
+        body,
+        .govuk-template,
+        .govuk-template__body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                         Helvetica, Arial, sans-serif, "Apple Color Emoji",
+                         "Segoe UI Emoji", "Segoe UI Symbol" !important;
+        }
+
+        [class*="govuk-"] {
+            font-family: inherit;
+        }
+
+        /* Nav Bar */
+        .app-nav-bar {
+            background: #0B1F33;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            border-bottom: 1px solid #505a5f;
+        }
+
+        .app-nav-bar__inner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .app-nav-bar__list {
+            display: flex;
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .app-nav-bar__item a {
+            display: block;
+            padding: 0.75rem 1.25rem;
+            color: #ffffff;
+            text-decoration: none;
+            font-size: 0.9375rem;
+            font-weight: 700;
+            border-top: 3px solid transparent;
+            border-bottom: 3px solid transparent;
+        }
+
+        .app-nav-bar__item a:hover,
+        .app-nav-bar__item a:focus {
+            background: #1d1d1d;
+            border-bottom-color: #1d70b8;
+            color: #ffffff;
+        }
+
+        .app-nav-bar__item--active a {
+            border-bottom-color: #1d70b8;
+        }
+
+        .app-nav-bar__brand {
+            color: #ffffff;
+            font-size: 1.125rem;
+            font-weight: 700;
+            text-decoration: none;
+            padding: 0.75rem 1.25rem;
+            display: block;
+        }
+
+        .app-nav-bar__brand:hover,
+        .app-nav-bar__brand:focus {
+            color: #ffffff;
+            text-decoration: none;
+        }
+
+        .app-nav-bar__toggle {
+            display: none;
+            background: none;
+            border: none;
+            color: white;
+            font-size: 1.125rem;
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            font-weight: 700;
+        }
+
+        @media (max-width: 48em) {
+            .app-nav-bar__toggle { display: block; }
+            .app-nav-bar__list { display: none; flex-direction: column; width: 100%; }
+            .app-nav-bar__list--open { display: flex; }
+            .app-nav-bar__inner { flex-wrap: wrap; }
+            .app-nav-bar__item a { padding: 0.75rem 1rem; border-bottom: none; border-left: 3px solid transparent; }
+            .app-nav-bar__item a:hover,
+            .app-nav-bar__item a:focus { border-left-color: #1d70b8; border-bottom: none; }
+            .app-nav-bar__item--active a { border-left-color: #1d70b8; border-bottom: none; }
+        }
+
+        /* Step cards */
+        .app-step {
+            position: relative;
+            padding-left: 3.5rem;
+            margin-bottom: 2.5rem;
+        }
+
+        .app-step__number {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 2.5rem;
+            height: 2.5rem;
+            background: #1d70b8;
+            color: #fff;
+            font-size: 1.25rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+        }
+
+        .app-step__title {
+            margin-top: 0;
+            margin-bottom: 0.5rem;
+        }
+
+        /* Code blocks */
+        .app-code-block {
+            background: #0b0c0c;
+            color: #00ff00;
+            padding: 1rem;
+            font-family: 'SF Mono', 'Consolas', 'Liberation Mono', monospace;
+            font-size: 0.875rem;
+            overflow-x: auto;
+            margin: 0.75rem 0;
+        }
+
+        .app-code-block pre {
+            margin: 0;
+        }
+
+        .app-code-block code {
+            color: inherit;
+            background: none;
+            padding: 0;
+        }
+
+        /* Phase heading colours */
+        .app-phase-heading { color: #1d70b8; }
+
+        /* Next steps grid */
+        .app-next-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1.5rem;
+            margin: 1.5rem 0;
+        }
+
+        .app-next-card {
+            border: 2px solid #b1b4b6;
+            padding: 1.25rem;
+            text-decoration: none;
+            color: inherit;
+            display: block;
+            transition: border-color 0.15s;
+        }
+
+        .app-next-card:hover {
+            border-color: #1d70b8;
+            background: #f8f8f8;
+        }
+
+        .app-next-card__title {
+            font-weight: 700;
+            color: #1d70b8;
+            font-size: 1.125rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .app-next-card__desc {
+            color: #505a5f;
+            font-size: 0.875rem;
+            margin: 0;
+        }
+
+        /* Platform tabs */
+        .app-platform-tabs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .app-platform-tab {
+            padding: 0.625rem 1.25rem;
+            border: 2px solid #b1b4b6;
+            background: #fff;
+            color: #0b0c0c;
+            font-size: 0.9375rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: border-color 0.15s, background 0.15s;
+        }
+
+        .app-platform-tab:hover {
+            border-color: #1d70b8;
+            background: #f8f8f8;
+        }
+
+        .app-platform-tab--active {
+            border-color: #1d70b8;
+            background: #1d70b8;
+            color: #fff;
+        }
+
+        .app-platform-tab--premier {
+            position: relative;
+        }
+
+        .app-platform-tab--premier::after {
+            content: "Premier";
+            position: absolute;
+            top: -0.5rem;
+            right: -0.25rem;
+            font-size: 0.625rem;
+            background: #00703c;
+            color: #fff;
+            padding: 0.0625rem 0.3125rem;
+            font-weight: 700;
+            line-height: 1.4;
+        }
+
+        .app-platform-content {
+            display: none;
+        }
+
+        .app-platform-content--active {
+            display: block;
+        }
+
+        .app-install-note {
+            background: #f3f2f1;
+            border-left: 4px solid #1d70b8;
+            padding: 0.75rem 1rem;
+            margin: 0.75rem 0;
+            font-size: 0.875rem;
+        }
+
+        /* Footer */
+        .app-footer {
+            background: #0b0c0c;
+            color: white;
+            padding: 2rem 0;
+            margin-top: 3rem;
+        }
+
+        .app-footer a { color: white; text-decoration: underline; }
+        .app-footer a:hover { color: #5694ca; }
+    </style>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "HowTo",
+                "@id": "https://arckit.org/getting-started.html",
+                "name": "Install ArcKit | Getting Started Guide",
+                "description": "Install the ArcKit AI harness in 5 minutes for Claude Code, Codex CLI, Gemini CLI, OpenCode CLI, GitHub Copilot, or Mistral Vibe, then create governed architecture artifacts.",
+                "totalTime": "PT5M",
+                "step": [
+                    { "@type": "HowToStep", "position": 1, "name": "Choose Your AI Platform", "text": "Pick Claude Code (premier), Gemini CLI, Codex CLI, OpenCode CLI, GitHub Copilot, or Mistral Vibe." },
+                    { "@type": "HowToStep", "position": 2, "name": "Install Your AI Tool", "text": "Install Claude Code, Gemini CLI, Codex CLI, OpenCode CLI, GitHub Copilot, or Mistral Vibe using the platform-specific installer." },
+                    { "@type": "HowToStep", "position": 3, "name": "Install ArcKit", "text": "Add the ArcKit plugin (Claude Code and Codex CLI), extension (Gemini CLI and Mistral Vibe), or run arckit init (OpenCode/Copilot)." },
+                    { "@type": "HowToStep", "position": 4, "name": "Open Your Project", "text": "Navigate to your project directory and launch your chosen AI tool." },
+                    { "@type": "HowToStep", "position": 5, "name": "Get Oriented", "text": "Run the start command to see project status and recommended next steps." },
+                    { "@type": "HowToStep", "position": 6, "name": "Follow GDS Phases", "text": "Use ArcKit commands to generate artifacts for Discovery, Alpha, and Beta phases." }
+                ],
+                "isPartOf": { "@type": "WebSite", "name": "ArcKit", "url": "https://arckit.org" }
+            },
+            {
+                "@type": "BreadcrumbList",
+                "itemListElement": [
+                    { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://arckit.org/" },
+                    { "@type": "ListItem", "position": 2, "name": "Getting Started", "item": "https://arckit.org/getting-started.html" }
+                ]
+            }
+        ]
+    }
+    </script>
+</head>
+<body class="govuk-template__body">
+    <a class="govuk-skip-link" href="#main-content">Skip to main content</a>
+    <script>document.body.className += ' js-enabled' + ('noModule' in HTMLScriptElement.prototype ? ' govuk-frontend-supported' : '');</script>
+
+    <nav class="app-nav-bar" aria-label="Main navigation">
+        <div class="govuk-width-container app-nav-bar__inner">
+            <a href="index.html" class="app-nav-bar__brand">ArcKit</a>
+            <button class="app-nav-bar__toggle" aria-expanded="false" aria-controls="nav-menu" onclick="var l=document.getElementById('nav-menu');var o=l.classList.toggle('app-nav-bar__list--open');this.setAttribute('aria-expanded',o)">&#9776; Menu</button>
+            <ul class="app-nav-bar__list" id="nav-menu">
+                <li class="app-nav-bar__item"><a href="commands.html">AI Commands</a></li>
+                <li class="app-nav-bar__item"><a href="use-cases.html">Example Projects</a></li>
+                <li class="app-nav-bar__item"><a href="guides.html">Guides</a></li>
+                <li class="app-nav-bar__item"><a href="roles.html">Roles</a></li>
+                <li class="app-nav-bar__item"><a href="articles.html">Articles</a></li>
+                <li class="app-nav-bar__item app-nav-bar__item--active"><a href="getting-started.html">Getting Started</a></li>
+                <li class="app-nav-bar__item"><a href="contributors.html">Contributors</a></li>
+                <li class="app-nav-bar__item"><a href="https://tractorjuice.github.io/arckit-fde/">FDE</a></li>
+            </ul>
+            <div class="app-nav-bar__icons">
+                <a href="https://github.com/tractorjuice/arc-kit" class="app-icon-link" aria-label="GitHub repository" title="GitHub repository">
+                    <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                </a>
+                <a href="https://discord.gg/JqgjQSnD" target="_blank" rel="noopener" class="app-icon-link" aria-label="Discord community" title="Discord community">
+                    <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M13.545 2.907a13.227 13.227 0 0 0-3.257-1.011.05.05 0 0 0-.052.025c-.141.25-.297.577-.406.833a12.19 12.19 0 0 0-3.658 0 8.258 8.258 0 0 0-.412-.833.051.051 0 0 0-.052-.025c-1.125.194-2.22.534-3.257 1.011a.041.041 0 0 0-.021.018C.356 6.024-.213 9.047.066 12.032c.001.014.01.028.021.037a13.276 13.276 0 0 0 3.995 2.02.05.05 0 0 0 .056-.019c.308-.42.582-.863.818-1.329a.05.05 0 0 0-.01-.059.051.051 0 0 0-.018-.011 8.875 8.875 0 0 1-1.248-.595.05.05 0 0 1-.02-.066.051.051 0 0 1 .015-.019c.084-.063.168-.129.248-.195a.05.05 0 0 1 .051-.007c2.619 1.196 5.454 1.196 8.041 0a.052.052 0 0 1 .053.007c.08.066.164.132.248.195a.051.051 0 0 1-.004.085 8.254 8.254 0 0 1-1.249.594.05.05 0 0 0-.03.03.052.052 0 0 0 .003.041c.24.465.515.909.817 1.329a.05.05 0 0 0 .056.019 13.235 13.235 0 0 0 4.001-2.02.049.049 0 0 0 .021-.037c.334-3.451-.559-6.449-2.366-9.106a.034.034 0 0 0-.02-.019Zm-8.198 7.307c-.789 0-1.438-.724-1.438-1.612 0-.889.637-1.613 1.438-1.613.807 0 1.45.73 1.438 1.613 0 .888-.637 1.612-1.438 1.612Zm5.316 0c-.788 0-1.438-.724-1.438-1.612 0-.889.637-1.613 1.438-1.613.807 0 1.451.73 1.438 1.613 0 .888-.631 1.612-1.438 1.612Z"/></svg>
+                </a>
+                <button class="app-theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode" title="Toggle theme"></button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="app-page-hero app-page-hero--getting-started">
+        <div class="govuk-width-container app-page-hero__content">
+            <span class="app-page-hero__stat">5 Minute Setup</span>
+            <h1 class="app-page-hero__title">Install ArcKit</h1>
+            <p class="app-page-hero__description">Set up ArcKit for Claude Code, Codex CLI, Gemini CLI, OpenCode CLI, GitHub Copilot, or Mistral Vibe and start your first governed architecture project.</p>
+        </div>
+    </div>
+
+    <main class="govuk-main-wrapper" id="main-content" role="main">
+        <div class="govuk-width-container">
+            <a href="index.html" class="govuk-back-link govuk-!-margin-bottom-6">Back to ArcKit</a>
+
+            <p class="govuk-body-l">This quick start is the official ArcKit AI harness setup path for new projects. Pick your AI platform, install the core plugin or extension, then run the first command to create traceable architecture governance artifacts.</p>
+
+            <!-- Platform selector -->
+            <h2 class="govuk-heading-l">Choose your AI platform</h2>
+            <div class="app-platform-tabs">
+                <button class="app-platform-tab app-platform-tab--premier app-platform-tab--active" data-platform="claude">Claude Code</button>
+                <button class="app-platform-tab" data-platform="gemini">Gemini CLI</button>
+                <button class="app-platform-tab" data-platform="codex">Codex CLI</button>
+                <button class="app-platform-tab" data-platform="opencode">OpenCode CLI</button>
+                <button class="app-platform-tab" data-platform="copilot">GitHub Copilot</button>
+                <button class="app-platform-tab" data-platform="vibe">Mistral Vibe</button>
+            </div>
+
+            <!-- Claude Code -->
+            <div class="app-platform-content app-platform-content--active" id="platform-claude">
+                <div class="app-step">
+                    <span class="app-step__number">1</span>
+                    <h2 class="govuk-heading-m app-step__title">Install Claude Code</h2>
+                    <p class="govuk-body">macOS, Linux &amp; WSL:</p>
+                    <div class="app-code-block">curl -fsSL https://claude.ai/install.sh | bash</div>
+                    <p class="govuk-body govuk-!-margin-top-3">Windows (PowerShell):</p>
+                    <div class="app-code-block">irm https://claude.ai/install.ps1 | iex</div>
+                    <p class="govuk-body govuk-!-margin-top-3">Already have <code>claude</code> on your PATH? Make sure you're on the latest:</p>
+                    <div class="app-code-block">claude install latest</div>
+                    <div class="app-install-note">ArcKit requires Claude Code <strong>v2.1.156 or later</strong>. <code>claude install</code> accepts <code>stable</code>, <code>latest</code>, or a specific version. The plugin warns at session start if you're below the supported floor. See <a href="https://code.claude.com/docs/en/setup" class="govuk-link">setup docs</a> for Homebrew and WinGet alternatives.</div>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">2</span>
+                    <h2 class="govuk-heading-m app-step__title">Install ArcKit Plugins</h2>
+                    <div class="app-code-block">/plugin marketplace add tractorjuice/arc-kit</div>
+                    <p class="govuk-body govuk-!-margin-top-3">As of v5.1.0 the marketplace ships <strong>8 plugins</strong> &mdash; install only the jurisdictions you need:</p>
+                    <div class="app-code-block"><pre><code># Core (UK Government civilian + generic enterprise)
+claude plugin install arckit
+
+# UK + one community overlay (e.g. UAE federal)
+claude plugin install arckit arckit-uae
+
+# Everything (UK + UAE + FR + CA + EU + AT + AU + US)
+claude plugin install arckit arckit-{uae,fr,ca,eu,at,au,us}</code></pre></div>
+                    <p class="govuk-body govuk-!-margin-top-3">The 7 community plugins (<code>arckit-uae</code>, <code>arckit-fr</code>, <code>arckit-ca</code>, <code>arckit-eu</code>, <code>arckit-at</code>, <code>arckit-au</code>, <code>arckit-us</code>) auto-install the <code>arckit</code> core plugin as a declared dependency. Updates are automatic via the marketplace.</p>
+                    <p class="govuk-body govuk-!-margin-top-2"><strong>Lighter clone:</strong> to skip the other AI-assistant distributions in the monorepo (~100&nbsp;MB), add the marketplace with sparse-checkout. Each plugin directory you want to install is listed explicitly:</p>
+                    <div class="app-code-block"><pre><code># Core only
+claude plugin marketplace add tractorjuice/arc-kit --sparse .claude-plugin arckit-claude
+
+# Core + UAE overlay
+claude plugin marketplace add tractorjuice/arc-kit --sparse .claude-plugin arckit-claude arckit-uae
+
+# All 8 plugins
+claude plugin marketplace add tractorjuice/arc-kit --sparse .claude-plugin \
+  arckit-claude arckit-uae arckit-fr arckit-ca arckit-eu arckit-at arckit-au arckit-us</code></pre></div>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">3</span>
+                    <h2 class="govuk-heading-m app-step__title">Open Your Project</h2>
+                    <div class="app-code-block"><pre><code>cd my-project
+claude</code></pre></div>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">4</span>
+                    <h2 class="govuk-heading-m app-step__title">Get Oriented</h2>
+                    <div class="app-code-block">/arckit:start</div>
+                    <p class="govuk-body govuk-!-margin-top-3">Shows project status, connected tools, command decision tree, and recommended next steps.</p>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">5</span>
+                    <h2 class="govuk-heading-m app-step__title">Initialize Project Structure</h2>
+                    <div class="app-code-block">/arckit:init</div>
+                    <p class="govuk-body govuk-!-margin-top-3">Creates the <code>projects/</code> directory structure for architecture artifacts.</p>
+                </div>
+            </div>
+
+            <!-- Gemini CLI -->
+            <div class="app-platform-content" id="platform-gemini">
+                <div class="app-step">
+                    <span class="app-step__number">1</span>
+                    <h2 class="govuk-heading-m app-step__title">Install Gemini CLI</h2>
+                    <p class="govuk-body">npm (requires Node.js 20+):</p>
+                    <div class="app-code-block">npm install -g @google/gemini-cli</div>
+                    <p class="govuk-body govuk-!-margin-top-3">Homebrew (macOS &amp; Linux):</p>
+                    <div class="app-code-block">brew install gemini-cli</div>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">2</span>
+                    <h2 class="govuk-heading-m app-step__title">Install ArcKit Extension</h2>
+                    <div class="app-code-block">gemini extensions install https://github.com/tractorjuice/arckit-gemini</div>
+                    <p class="govuk-body govuk-!-margin-top-3">Zero-config: ArcKit commands, templates, scripts, and bundled MCP servers. Update with <code>gemini extensions update arckit</code>.</p>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">3</span>
+                    <h2 class="govuk-heading-m app-step__title">Open Your Project</h2>
+                    <div class="app-code-block"><pre><code>cd my-project
+gemini</code></pre></div>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">4</span>
+                    <h2 class="govuk-heading-m app-step__title">Get Oriented</h2>
+                    <div class="app-code-block">/arckit:start</div>
+                    <p class="govuk-body govuk-!-margin-top-3">Shows project status, connected tools, command decision tree, and recommended next steps.</p>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">5</span>
+                    <h2 class="govuk-heading-m app-step__title">Initialize Project Structure</h2>
+                    <div class="app-code-block">/arckit:init</div>
+                    <p class="govuk-body govuk-!-margin-top-3">Creates the <code>projects/</code> directory structure for architecture artifacts.</p>
+                </div>
+            </div>
+
+            <!-- Codex CLI -->
+            <div class="app-platform-content" id="platform-codex">
+                <div class="app-step">
+                    <span class="app-step__number">1</span>
+                    <h2 class="govuk-heading-m app-step__title">Install Codex CLI</h2>
+                    <p class="govuk-body">npm (requires Node.js 22+):</p>
+                    <div class="app-code-block">npm install -g @openai/codex</div>
+                    <p class="govuk-body govuk-!-margin-top-3">Homebrew:</p>
+                    <div class="app-code-block">brew install codex</div>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">2</span>
+                    <h2 class="govuk-heading-m app-step__title">Install ArcKit Plugin</h2>
+                    <p class="govuk-body">Add the ArcKit Codex marketplace:</p>
+                    <div class="app-code-block"><pre><code>codex plugin marketplace add tractorjuice/arckit-codex</code></pre></div>
+                    <p class="govuk-body govuk-!-margin-top-3">Enable lifecycle hooks in your user or project Codex config:</p>
+                    <div class="app-code-block"><pre><code># ~/.codex/config.toml or .codex/config.toml
+[features]
+hooks = true
+plugin_hooks = true</code></pre></div>
+                    <p class="govuk-body govuk-!-margin-top-3">Restart Codex, run <code>/plugins</code>, choose <strong>ArcKit Plugins</strong>, then install and enable <strong>ArcKit</strong>. The plugin bundles ArcKit command skills, reference skills, agent configs, MCP config, templates, schemas, scripts, and <code>hooks/hooks.json</code>.</p>
+                    <p class="govuk-body govuk-!-margin-top-2">Prefer a project-scoped copy instead? Use <code>arckit init my-project --ai codex</code> from the ArcKit CLI.</p>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">3</span>
+                    <h2 class="govuk-heading-m app-step__title">Open Your Project</h2>
+                    <div class="app-code-block"><pre><code>cd my-project
+codex</code></pre></div>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">4</span>
+                    <h2 class="govuk-heading-m app-step__title">Get Oriented</h2>
+                    <div class="app-code-block">$arckit-start</div>
+                    <p class="govuk-body govuk-!-margin-top-3">Shows project status, connected tools, command decision tree, and recommended next steps.</p>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">5</span>
+                    <h2 class="govuk-heading-m app-step__title">Initialize Project Structure</h2>
+                    <div class="app-code-block">$arckit-init</div>
+                    <p class="govuk-body govuk-!-margin-top-3">Creates the <code>projects/</code> directory structure for architecture artifacts.</p>
+                </div>
+            </div>
+
+            <!-- OpenCode CLI -->
+            <div class="app-platform-content" id="platform-opencode">
+                <div class="app-step">
+                    <span class="app-step__number">1</span>
+                    <h2 class="govuk-heading-m app-step__title">Install OpenCode CLI</h2>
+                    <p class="govuk-body">Install script (recommended):</p>
+                    <div class="app-code-block">curl -fsSL https://opencode.ai/install | bash</div>
+                    <p class="govuk-body govuk-!-margin-top-3">npm:</p>
+                    <div class="app-code-block">npm install -g opencode-ai</div>
+                    <p class="govuk-body govuk-!-margin-top-3">Homebrew (macOS &amp; Linux):</p>
+                    <div class="app-code-block">brew install anomalyco/tap/opencode</div>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">2</span>
+                    <h2 class="govuk-heading-m app-step__title">Install ArcKit CLI &amp; Initialize Project</h2>
+                    <p class="govuk-body">Install the ArcKit CLI, then initialize your project:</p>
+                    <div class="app-code-block"><pre><code># Install with pip
+pip install git+https://github.com/tractorjuice/arc-kit.git
+
+# Or with uv (recommended)
+uv tool install arckit-cli --from git+https://github.com/tractorjuice/arc-kit.git
+
+# Initialize project
+arckit init my-project --ai opencode</code></pre></div>
+                    <p class="govuk-body govuk-!-margin-top-3">This copies ArcKit commands, templates, and scripts into your project.</p>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">3</span>
+                    <h2 class="govuk-heading-m app-step__title">Open Your Project</h2>
+                    <div class="app-code-block"><pre><code>cd my-project
+opencode</code></pre></div>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">4</span>
+                    <h2 class="govuk-heading-m app-step__title">Get Oriented</h2>
+                    <div class="app-code-block">/arckit:start</div>
+                    <p class="govuk-body govuk-!-margin-top-3">Shows project status, connected tools, command decision tree, and recommended next steps.</p>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">5</span>
+                    <h2 class="govuk-heading-m app-step__title">Initialize Project Structure</h2>
+                    <div class="app-code-block">/arckit:init</div>
+                    <p class="govuk-body govuk-!-margin-top-3">Creates the <code>projects/</code> directory structure for architecture artifacts.</p>
+                </div>
+            </div>
+
+            <!-- GitHub Copilot -->
+            <div class="app-platform-content" id="platform-copilot">
+                <div class="app-step">
+                    <span class="app-step__number">1</span>
+                    <h2 class="govuk-heading-m app-step__title">Install VS Code &amp; GitHub Copilot</h2>
+                    <p class="govuk-body">Install <a href="https://code.visualstudio.com/" class="govuk-link">VS Code</a> and the <a href="https://marketplace.visualstudio.com/items?itemName=GitHub.copilot" class="govuk-link">GitHub Copilot extension</a>.</p>
+                    <div class="app-install-note">Requires a GitHub Copilot subscription (Individual, Business, or Enterprise).</div>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">2</span>
+                    <h2 class="govuk-heading-m app-step__title">Install ArcKit CLI &amp; Initialize Project</h2>
+                    <p class="govuk-body">Install the ArcKit CLI, then initialize your project:</p>
+                    <div class="app-code-block"><pre><code># Install with pip
+pip install git+https://github.com/tractorjuice/arc-kit.git
+
+# Or with uv (recommended)
+uv tool install arckit-cli --from git+https://github.com/tractorjuice/arc-kit.git
+
+# Initialize project
+arckit init my-project --ai copilot</code></pre></div>
+                    <p class="govuk-body govuk-!-margin-top-3">This scaffolds ArcKit prompt files, research agents, templates, and scripts into your project.</p>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">3</span>
+                    <h2 class="govuk-heading-m app-step__title">Open Your Project in VS Code</h2>
+                    <div class="app-code-block">code my-project</div>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">4</span>
+                    <h2 class="govuk-heading-m app-step__title">Use Commands in Copilot Chat</h2>
+                    <p class="govuk-body">Open Copilot Chat (Ctrl+Shift+I / Cmd+Shift+I) and type <code>/</code> to see all <code>arckit-*</code> commands in autocomplete.</p>
+                    <div class="app-code-block">/arckit-start</div>
+                    <p class="govuk-body govuk-!-margin-top-3">Shows project status, command decision tree, and recommended next steps.</p>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">5</span>
+                    <h2 class="govuk-heading-m app-step__title">Initialize Project Structure</h2>
+                    <div class="app-code-block">/arckit-init</div>
+                    <p class="govuk-body govuk-!-margin-top-3">Creates the <code>projects/</code> directory structure for architecture artifacts.</p>
+                </div>
+            </div>
+
+            <!-- Mistral Vibe -->
+            <div class="app-platform-content" id="platform-vibe">
+                <div class="app-step">
+                    <span class="app-step__number">1</span>
+                    <h2 class="govuk-heading-m app-step__title">Install Mistral Vibe</h2>
+                    <p class="govuk-body">Install Mistral Vibe CLI using Mistral's current installer, then confirm the CLI is available:</p>
+                    <div class="app-code-block">vibe --version</div>
+                    <div class="app-install-note">ArcKit for Vibe is a local extension. The Vibe CLI must already be installed and authenticated before you link the ArcKit extension.</div>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">2</span>
+                    <h2 class="govuk-heading-m app-step__title">Install ArcKit Extension</h2>
+                    <p class="govuk-body">Clone the generated ArcKit Vibe extension and link it into your Vibe extensions directory:</p>
+                    <div class="app-code-block"><pre><code>git clone https://github.com/tractorjuice/arckit-vibe.git
+cd arckit-vibe
+mkdir -p ~/.vibe/extensions/
+ln -s "$(pwd)" ~/.vibe/extensions/arckit</code></pre></div>
+                    <p class="govuk-body govuk-!-margin-top-3">The extension bundles ArcKit skills, Vibe agent TOML files, templates, schemas, scripts, reference materials, and MCP configuration. Update it later with <code>git pull</code> from the cloned extension repository.</p>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">3</span>
+                    <h2 class="govuk-heading-m app-step__title">Open Your Project</h2>
+                    <div class="app-code-block"><pre><code>cd my-project
+vibe</code></pre></div>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">4</span>
+                    <h2 class="govuk-heading-m app-step__title">Get Oriented</h2>
+                    <div class="app-code-block">/arckit-start</div>
+                    <p class="govuk-body govuk-!-margin-top-3">Shows project status, connected tools, command decision tree, and recommended next steps.</p>
+                </div>
+
+                <div class="app-step">
+                    <span class="app-step__number">5</span>
+                    <h2 class="govuk-heading-m app-step__title">Initialize Project Structure</h2>
+                    <div class="app-code-block">/arckit-init</div>
+                    <p class="govuk-body govuk-!-margin-top-3">Creates the <code>projects/</code> directory structure for architecture artifacts.</p>
+                </div>
+            </div>
+
+            <!-- Vibe Start -->
+            <div class="govuk-notification-banner govuk-!-margin-top-6" role="region" aria-labelledby="vibe-start-title">
+                <div class="govuk-notification-banner__header">
+                    <h2 class="govuk-notification-banner__title" id="vibe-start-title">Fast path</h2>
+                </div>
+                <div class="govuk-notification-banner__content">
+                    <h3 class="govuk-notification-banner__heading">Vibe Start &mdash; the 3-prompt super prompt</h3>
+                    <p class="govuk-body">Skip the decision tree. Three prompts take you from empty repo to a fully-populated project. ArcKit chains commands via the <code>handoffs:</code> metadata in each command's frontmatter.</p>
+                    <div class="app-install-note">Use your platform syntax: Claude Code, Gemini CLI, and OpenCode use <code>/arckit:command</code>; Codex CLI uses <code>$arckit-command</code>; GitHub Copilot and Mistral Vibe use <code>/arckit-command</code>.</div>
+                    <p class="govuk-body govuk-!-margin-top-3"><strong>Claude Code / Gemini CLI / OpenCode example:</strong></p>
+                    <div class="app-code-block govuk-!-margin-top-3">/arckit:init  This is a project for {one-line description of what you're building}.</div>
+                    <div class="app-code-block govuk-!-margin-top-2">/arckit:principles</div>
+                    <p class="govuk-body govuk-!-margin-top-3"><strong>Codex CLI example:</strong></p>
+                    <div class="app-code-block govuk-!-margin-top-2">$arckit-init  This is a project for {one-line description of what you're building}.</div>
+                    <div class="app-code-block govuk-!-margin-top-2">$arckit-principles</div>
+                    <p class="govuk-body govuk-!-margin-top-3"><strong>GitHub Copilot / Mistral Vibe example:</strong></p>
+                    <div class="app-code-block govuk-!-margin-top-2">/arckit-init  This is a project for {one-line description of what you're building}.</div>
+                    <div class="app-code-block govuk-!-margin-top-2">/arckit-principles</div>
+                    <div class="app-code-block govuk-!-margin-top-2">Now create all the artifacts. Take your time. Do not stop until complete.</div>
+                    <p class="govuk-body govuk-!-margin-top-3"><strong>When to use it:</strong> greenfield projects, demos, proofs of concept, vibe-coding sessions where you want a complete first-pass set of artifacts to react to.</p>
+                    <p class="govuk-body"><strong>When not to use it:</strong> heavily regulated work (Secure by Design, MOD, EU AI Act) where each artifact needs reviewer sign-off; existing projects with artifacts already on disk (run <code>/arckit:navigator</code> first); token-constrained sessions.</p>
+                    <p class="govuk-body govuk-!-margin-bottom-0"><strong>If the run stalls:</strong> resume with <em>"Continue from where you stopped. Do not stop until complete."</em> Then run your platform's health command (<code>/arckit:health</code>, <code>$arckit-health</code>, or <code>/arckit-health</code>) to spot anything skipped. Full guide: <a href="guide-viewer.html?guide=start" class="govuk-link">Getting Started with ArcKit</a>.</p>
+                </div>
+            </div>
+
+            <!-- The GDS Harness -->
+            <div class="govuk-notification-banner govuk-!-margin-top-4" role="region" aria-labelledby="gds-harness-title">
+                <div class="govuk-notification-banner__header">
+                    <h2 class="govuk-notification-banner__title" id="gds-harness-title">Faster path (Claude Code only)</h2>
+                </div>
+                <div class="govuk-notification-banner__content">
+                    <h3 class="govuk-notification-banner__heading">The GDS Harness &mdash; <code>/arckit:build</code></h3>
+                    <p class="govuk-body">New in v4.13.0. Run one command and the whole architecture builds itself: requirements, stakeholder analysis, ADRs, risk register, business case, designs, Secure-by-Design assessment, DPIA, diagrams, traceability matrix, plus the post-build health check. Reads a YAML recipe, dispatches subagents in parallel waves, commits each wave atomically.</p>
+                    <div class="app-code-block">/arckit:build 001 --plan</div>
+                    <div class="app-code-block govuk-!-margin-top-2">/arckit:build 001</div>
+                    <div class="app-code-block govuk-!-margin-top-2">/arckit:build 002 --recipe uk-mod-sovereign</div>
+                    <div class="app-code-block govuk-!-margin-top-2">/arckit:build 003 --recipe uae-federal-ai</div>
+                    <div class="app-code-block govuk-!-margin-top-2">/arckit:build 004 --recipe ca-federal-fitaa</div>
+                    <p class="govuk-body govuk-!-margin-top-3"><strong>Four built-in recipes:</strong> <code>uk-saas</code> (38 targets, UK civilian SaaS), <code>uk-mod-sovereign</code> (38 targets, MOD / air-gapped with JSP 936 and MOD Secure by Design), <code>uae-federal-ai</code> (48 targets, UAE Cabinet agentic AI decree compliance with all 12 UAE community commands), and <code>ca-federal-fitaa</code> (Canada Federal FITAA-class compliance suite — all 12 ca-* commands plus core architecture governance).</p>
+                    <p class="govuk-body"><strong>Every recipe ships a research wave by default.</strong> An upstream <code>ORG_RESEARCH</code> target researches the target organisation once per repo (output to <code>projects/000-global/research/</code>), then per-project technology research runs in parallel (general market, AWS, Azure, GCP, plus <code>GOV_REUSE</code> for UK projects). Skip what you don't need with <code>--exclude AZURE_RESEARCH</code> etc.</p>
+                    <p class="govuk-body"><strong>Customize:</strong> copy a recipe to <code>.arckit/recipes/{name}.yaml</code> and edit. The harness reads project overrides first, falling back to the plugin defaults &mdash; your customisations survive plugin updates.</p>
+                    <p class="govuk-body"><strong>Resumable:</strong> state persists to <code>projects/{P}/.arckit/state.json</code>. If a wave fails, fix the underlying issue and run <code>/arckit:build 001 --resume</code> to pick up exactly where it stopped.</p>
+                    <p class="govuk-body"><strong>Other platforms note:</strong> this command is not generated for Codex, Gemini, OpenCode, GitHub Copilot, or Mistral Vibe. The build harness depends on Claude Code's parallel agent dispatch and plugin hook behaviour, so there is no supported non-Claude build-harness command.</p>
+                    <p class="govuk-body govuk-!-margin-bottom-0"><strong>When to use it:</strong> end-to-end governance builds where you want a full template-driven artefact set committed in atomic, reviewable waves. Full guide: <a href="guide-viewer.html?guide=build" class="govuk-link">Build Harness Guide</a>.</p>
+                </div>
+            </div>
+
+            <!-- Step 6 -->
+            <div class="app-step">
+                <span class="app-step__number">6</span>
+                <h2 class="govuk-heading-m app-step__title">Follow GDS Phases</h2>
+                <div class="app-install-note">Commands shown use Claude Code / Gemini CLI / OpenCode syntax (<code>/arckit:command</code>). For Codex CLI use <code>$arckit-command</code>. For GitHub Copilot and Mistral Vibe use <code>/arckit-command</code>.</div>
+
+                <h3 class="govuk-heading-s govuk-!-margin-top-4 app-phase-heading">Discovery</h3>
+                <div class="app-code-block">/arckit:stakeholders Analyze stakeholders for appointment system</div>
+                <div class="app-code-block govuk-!-margin-top-2">/arckit:risk Create risk register</div>
+                <div class="app-code-block govuk-!-margin-top-2">/arckit:sobc Generate Strategic Outline Business Case</div>
+
+                <h3 class="govuk-heading-s govuk-!-margin-top-4 app-phase-heading">Alpha</h3>
+                <div class="app-code-block">/arckit:requirements Define requirements</div>
+                <div class="app-code-block govuk-!-margin-top-2">/arckit:principles Establish architecture principles</div>
+                <div class="app-code-block govuk-!-margin-top-2">/arckit:wardley Create Wardley Map for build vs buy decisions</div>
+
+                <h3 class="govuk-heading-s govuk-!-margin-top-4 app-phase-heading">Beta</h3>
+                <div class="app-code-block">/arckit:hld-review Review High-Level Design</div>
+                <div class="app-code-block govuk-!-margin-top-2">/arckit:diagram Create C4 architecture diagrams</div>
+                <div class="app-code-block govuk-!-margin-top-2">/arckit:analyze Comprehensive gap analysis</div>
+            </div>
+
+            <div class="govuk-warning-text govuk-!-margin-top-4">
+                <span class="govuk-warning-text__icon" aria-hidden="true">!</span>
+                <strong class="govuk-warning-text__text">
+                    <span class="govuk-visually-hidden">Warning</span>
+                    AI generates first drafts following templates. Always review, validate, and refine AI output with human expertise.
+                </strong>
+            </div>
+
+            <hr class="govuk-section-break govuk-section-break--l govuk-section-break--visible">
+
+            <!-- Next Steps -->
+            <h2 class="govuk-heading-l">Next Steps</h2>
+            <div class="app-next-grid">
+                <a href="commands.html" class="app-next-card">
+                    <p class="app-next-card__title">Command Reference</p>
+                    <p class="app-next-card__desc">Browse the ArcKit command set with filters and dependency matrix.</p>
+                </a>
+                <a href="guides.html" class="app-next-card">
+                    <p class="app-next-card__title">Command Guides</p>
+                    <p class="app-next-card__desc">Step-by-step guides with prerequisites and real-world examples.</p>
+                </a>
+                <a href="roles.html" class="app-next-card">
+                    <p class="app-next-card__title">DDaT Role Guides</p>
+                    <p class="app-next-card__desc">Find commands tailored to your UK Government DDaT role.</p>
+                </a>
+                <a href="use-cases.html" class="app-next-card">
+                    <p class="app-next-card__title">Example Projects</p>
+                    <p class="app-next-card__desc">See AI-generated architecture documentation from real-world scenarios.</p>
+                </a>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+        <div class="govuk-width-container">
+            <div class="govuk-grid-row">
+                <div class="govuk-grid-column-two-thirds">
+                    <h2 class="govuk-heading-m">ArcKit</h2>
+                    <p class="govuk-body">The Enterprise Architecture Governance Harness</p>
+                </div>
+                <div class="govuk-grid-column-one-third">
+                    <h3 class="govuk-heading-s">Links</h3>
+                    <ul class="govuk-list">
+                        <li><a href="https://github.com/tractorjuice/arc-kit">GitHub Repository</a></li>
+                        <li><a href="https://github.com/tractorjuice/arc-kit/issues">Report Issues</a></li>
+                        <li><a href="https://github.com/tractorjuice/arc-kit/releases">Releases</a></li>
+                    </ul>
+                </div>
+            </div>
+            <hr class="govuk-section-break govuk-section-break--m govuk-section-break--visible">
+            <p class="govuk-body-s">MIT License</p>
+        </div>
+    </footer>
+
+    <!-- GOV.UK Frontend JavaScript -->
+    <script type="module" src="https://cdn.jsdelivr.net/npm/govuk-frontend@5.13.0/dist/govuk/govuk-frontend.min.js" integrity="sha384-DwGEYeDIkSBDH4+n4Z+tY7m0/hKLvETQmD6glhDiHn0lFo3hffImqh39zfNvHVrd" crossorigin="anonymous"></script>
+    <script type="module">
+        import { initAll } from 'https://cdn.jsdelivr.net/npm/govuk-frontend@5.13.0/dist/govuk/govuk-frontend.min.js'
+        initAll()
+    </script>
+<script src="theme.js"></script>
+    <script>
+        (function() {
+            var tabs = document.querySelectorAll('.app-platform-tab');
+            tabs.forEach(function(tab) {
+                tab.addEventListener('click', function() {
+                    var platform = this.getAttribute('data-platform');
+                    tabs.forEach(function(t) { t.classList.remove('app-platform-tab--active'); });
+                    this.classList.add('app-platform-tab--active');
+                    document.querySelectorAll('.app-platform-content').forEach(function(c) {
+                        c.classList.remove('app-platform-content--active');
+                    });
+                    document.getElementById('platform-' + platform).classList.add('app-platform-content--active');
+                });
+            });
+        })();
+    </script>
+</body>
+</html>

@@ -39,6 +39,16 @@ class ResearchRequest(BaseModel):
     workspace_id: str | None = None
     run_id: str | None = None
 
+    # NEW: Format selection (from format taxonomy system)
+    format: str = "report"  # "academic", "business", "technical", "product", "literature", "data"
+    length: str = "full"    # format-specific length
+    audience: str = "general"  # "researcher", "executive", "cto", "pm", etc.
+    options: dict[str, Any] = Field(default_factory=dict)  # format-specific options
+    export_format: str = "markdown"  # "markdown", "pdf", "docx", "latex"
+
+    # NEW: Skill override (for advanced users)
+    skills: list[str] | None = None  # Override auto-resolved skills
+
 
 # ─── Research Planning ───────────────────────────────────────────────
 
@@ -163,6 +173,13 @@ class RunSummary(BaseModel):
     status: str = "initializing"
     progress: int = 0
     workspace_id: str | None = None
+    # NEW: Format taxonomy fields
+    format: str | None = None
+    length: str | None = None
+    audience: str | None = None
+    export_format: str | None = None
+    skills_used: list[str] = []
+    options: dict[str, Any] = Field(default_factory=dict)
 
 
 # ─── Mindmap (G6 Graph) ─────────────────────────────────────────────
@@ -415,6 +432,13 @@ class PlanApproval(BaseModel):
     export_formats: list[str] = Field(default_factory=lambda: ["markdown", "pdf"])
     workspace_id: str | None = None
     run_id: str | None = None
+    # NEW: Format taxonomy fields
+    format: str = "report"
+    length: str = "full"
+    audience: str = "general"
+    options: dict[str, Any] = Field(default_factory=dict)
+    export_format: str = "markdown"
+    skills: list[str] | None = None
 
 
 class OpenFileRequest(BaseModel):

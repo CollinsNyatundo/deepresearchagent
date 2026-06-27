@@ -1,0 +1,54 @@
+{
+  "name": "arckit",
+  "version": "5.15.0",
+  "description": "The Enterprise Architecture Governance Harness - 68 commands across strategy, architecture, delivery, and assurance — including UK Government compliance",
+  "contextFileName": "GEMINI.md",
+  "mcpServers": {
+    "aws-knowledge": {
+      "httpUrl": "https://knowledge-mcp.global.api.aws"
+    },
+    "microsoft-learn": {
+      "httpUrl": "https://learn.microsoft.com/api/mcp"
+    },
+    "google-developer-knowledge": {
+      "httpUrl": "https://developerknowledge.googleapis.com/mcp",
+      "headers": {
+        "X-Goog-Api-Key": "${GOOGLE_API_KEY}"
+      }
+    },
+    "datacommons-mcp": {
+      "httpUrl": "https://api.datacommons.org/mcp",
+      "headers": {
+        "X-API-Key": "${DATA_COMMONS_API_KEY}"
+      }
+    },
+    "govreposcrape": {
+      "httpUrl": "https://govreposcrape-api-1060386346356.us-central1.run.app/mcp"
+    }
+  },
+  "themes": [
+    {
+      "name": "arckit",
+      "type": "custom",
+      "background": {
+        "primary": "#0b0c0c"
+      },
+      "text": {
+        "primary": "#f0f0f0",
+        "secondary": "#b1b4b6",
+        "link": "#1d70b8"
+      },
+      "status": {
+        "success": "#00703c",
+        "warning": "#f47738",
+        "error": "#d4351c"
+      },
+      "border": {
+        "default": "#505a5f"
+      },
+      "ui": {
+        "comment": "#a0a8b0"
+      }
+    }
+  ]
+}

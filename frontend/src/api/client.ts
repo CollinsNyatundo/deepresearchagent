@@ -26,6 +26,12 @@ import type {
   CitationVerificationResponse,
   CitationVerificationRequest,
   QualityReport,
+  // NEW: Format taxonomy types
+  ResearchFormatListResponse,
+  ResearchFormatDetail,
+  ResearchLengthListResponse,
+  ResearchAudienceListResponse,
+  ResearchSkillListResponse,
 } from '../types/api';
 
 
@@ -333,6 +339,38 @@ export const api = {
       body: JSON.stringify({ model }),
     });
     return res.json();
+  },
+
+  // ─── Format Taxonomy API (Slice 6) ─────────────────────────────────
+
+  /** List all available research output formats. */
+  async listResearchFormats(): Promise<ResearchFormatListResponse> {
+    const res = await fetch(`${BASE_URL}/research/formats`);
+    return handleResponse<ResearchFormatListResponse>(res);
+  },
+
+  /** Get detailed metadata for a specific research format. */
+  async getResearchFormat(formatId: string): Promise<ResearchFormatDetail> {
+    const res = await fetch(`${BASE_URL}/research/formats/${encodeURIComponent(formatId)}`);
+    return handleResponse<ResearchFormatDetail>(res);
+  },
+
+  /** Get length options for a specific research format. */
+  async getResearchFormatLengths(formatId: string): Promise<ResearchLengthListResponse> {
+    const res = await fetch(`${BASE_URL}/research/formats/${encodeURIComponent(formatId)}/lengths`);
+    return handleResponse<ResearchLengthListResponse>(res);
+  },
+
+  /** Get audience options for a specific research format. */
+  async getResearchFormatAudiences(formatId: string): Promise<ResearchAudienceListResponse> {
+    const res = await fetch(`${BASE_URL}/research/formats/${encodeURIComponent(formatId)}/audiences`);
+    return handleResponse<ResearchAudienceListResponse>(res);
+  },
+
+  /** List all available research skills. */
+  async listResearchSkills(): Promise<ResearchSkillListResponse> {
+    const res = await fetch(`${BASE_URL}/research/skills`);
+    return handleResponse<ResearchSkillListResponse>(res);
   },
 
   // ──── Knowledge Graph (Graphify) ────────────────────────────────────

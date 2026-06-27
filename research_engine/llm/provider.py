@@ -26,10 +26,11 @@ def validate_model_id(model: str, provider: str | None = None) -> str:
 
     OpenRouter model IDs follow the 'provider/model' format.
     Groq model IDs are plain names (e.g. 'llama-3.3-70b-versatile').
+    NVIDIA model IDs are plain names (e.g. 'nemotron-3-super-120b-a12b').
 
     Args:
         model: The model ID to validate.
-        provider: Optional provider hint ('groq' skips the slash requirement).
+        provider: Optional provider hint ('groq' or 'nvidia' skips the slash requirement).
 
     Returns:
         The validated and stripped model ID.
@@ -46,11 +47,16 @@ def validate_model_id(model: str, provider: str | None = None) -> str:
     if model.startswith("groq/"):
         model = model[len("groq/"):]
         return model
+    # For NVIDIA direct API, keep the nvidia/ prefix
+    # (models are e.g. 'nvidia/nemotron-3-super-120b-a12b')
+    if provider == "nvidia" and model.startswith("nvidia/"):
+        return model
     # OpenRouter requires provider/model format; Groq uses plain names
-    if provider != "groq" and "/" not in model:
+    if provider not in ("groq", "nvidia") and "/" not in model:
         raise ValueError(
             f"Model ID must be in 'provider/model' format (got '{model}'). "
-            "Check the exact id on OpenRouter or use --provider groq for Groq models."
+            "Check the exact id on OpenRouter or use --provider groq for Groq models "
+            "or --provider nvidia for NVIDIA models."
         )
     return model
 
@@ -60,12 +66,42 @@ class LLMProvider:
 
     Supports runtime model selection — every call can specify a different model.
     Falls back gracefully when structured output is not supported.
+    Includes rate limiting for Groq free tier (20 RPM).
     """
 
     def __init__(self, config: LLMConfig | None = None):
         self.config = config or LLMConfig()
         self.openrouter_api_key = os.environ.get("OPENROUTER_API_KEY", "")
         self.groq_api_key = os.environ.get("GROQ_API_KEY", "")
+        self.nvidia_api_key = os.environ.get("NVIDIA_API_KEY", "")
+        # Rate limiting: track last call time per provider
+        self._last_call_time: dict[str, float] = {}
+        # Groq free tier: 20 RPM → 3s between calls, use 4s for safety
+        self._groq_min_interval = 4.0
+
+    async def _rate_limit(self, provider: str) -> None:
+        """Enforce rate limits between LLM calls."""
+        import time
+        if provider == "groq":
+            now = time.monotonic()
+            last = self._last_call_time.get("groq", 0)
+            elapsed = now - last
+            if elapsed < self._groq_min_interval:
+                delay = self._groq_min_interval - elapsed
+                logger.debug(f"Groq rate limit: waiting {delay:.1f}s")
+                await asyncio.sleep(delay)
+            self._last_call_time["groq"] = time.monotonic()
+        elif provider == "nvidia":
+            # NVIDIA rate limit: 40 RPM for free tier
+            now = time.monotonic()
+            last = self._last_call_time.get("nvidia", 0)
+            elapsed = now - last
+            min_interval = 1.5
+            if elapsed < min_interval:
+                delay = min_interval - elapsed
+                logger.debug(f"NVIDIA rate limit: waiting {delay:.1f}s")
+                await asyncio.sleep(delay)
+            self._last_call_time["nvidia"] = time.monotonic()
 
     def _get_llm(
         self,
@@ -74,7 +110,7 @@ class LLMProvider:
         max_tokens: int | None = None,
         provider: str | None = None,
     ) -> ChatOpenAI:
-        """Create a ChatOpenAI instance pointed at OpenRouter or Groq."""
+        """Create a ChatOpenAI instance pointed at OpenRouter, Groq, or NVIDIA."""
         provider = provider or self.config.provider
 
         if provider == "groq":
@@ -89,6 +125,16 @@ class LLMProvider:
             # Groq free tier TPM = 12,000 (input + max_output_tokens counted together).
             # Use groq_max_tokens (default 4096) to stay within limits.
             effective_max_tokens = max_tokens or self.config.groq_max_tokens
+        elif provider == "nvidia":
+            api_key = self.nvidia_api_key
+            base_url = "https://integrate.api.nvidia.com/v1"
+            # NVIDIA direct API uses full model names WITH the nvidia/ prefix
+            # e.g. 'nvidia/nemotron-3-super-120b-a12b'
+            if model and model.startswith("nvidia/"):
+                pass  # Keep the prefix for NVIDIA direct API
+            if not model:
+                model = "nvidia/nemotron-3-super-120b-a12b"
+            effective_max_tokens = max_tokens or self.config.max_tokens
         else:
             api_key = self.openrouter_api_key
             base_url = self.config.base_url
@@ -127,9 +173,11 @@ class LLMProvider:
             The model's text response.
         """
         llm = self._get_llm(model=model, temperature=temperature, provider=provider)
+        effective_provider = provider or self.config.provider
 
         for attempt in range(MAX_RETRIES):
             try:
+                await self._rate_limit(effective_provider)
                 response = await llm.ainvoke(prompt)
                 return response.content
             except Exception as e:
@@ -156,7 +204,7 @@ class LLMProvider:
     ) -> dict[str, Any]:
         """Structured output with automatic fallback to JSON parsing.
 
-        For Groq models, uses 'json_object' mode (llama-3.3-70b-versatile does
+        For Groq models, uses 'json_mode' (llama-3.3-70b-versatile does
         not support 'json_schema'). For OpenRouter, tries 'json_schema' first.
         Falls back to raw completion + Pydantic validation for both.
 
@@ -174,10 +222,11 @@ class LLMProvider:
         llm = self._get_llm(model=model, temperature=temperature, provider=provider)
 
         # Strategy 1: Native structured output
-        # Groq's llama models support json_object but NOT json_schema.
+        # Groq's llama models support json_mode but NOT json_schema.
         # Only openai/gpt-oss-* models on Groq support json_schema (strict mode).
-        structured_output_method = "json_object" if effective_provider == "groq" else "json_schema"
+        structured_output_method = "json_mode" if effective_provider == "groq" else "json_schema"
         try:
+            await self._rate_limit(effective_provider)
             structured_llm = llm.with_structured_output(
                 schema=schema, method=structured_output_method
             )

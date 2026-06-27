@@ -1,7 +1,10 @@
-# Version Control
+# Version Control and IDE
 .git
 .gitnexus
 .worktrees
+.codegraph
+.vscode
+.idea
 
 # Python virtual environment and caches
 .venv
@@ -63,6 +66,9 @@ worker_m1_auth_db_fix
 worker_m2_similarity
 test_results*.txt
 ruff_output.txt
+fix_orchestrator_report.txt
+test_cypher.json
+test_cypher2.json
 
 # Large media and exports / archives
 **/*.zip

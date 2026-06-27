@@ -1,0 +1,62 @@
+# ArcKit Mistral Vibe Extension Configuration
+# Version: 5.15.0
+# Generated from ArcKit canonical plugin (plugins/arckit-claude/)
+
+[extension]
+name = "arckit"
+version = "5.15.0"
+description = """
+The Enterprise Architecture Governance Harness - 73+ slash commands across
+strategy, architecture, delivery, and assurance. Enables enterprise architects
+to manage architecture principles, requirements, vendor evaluation, risk
+management, and compliance workflows in Mistral Vibe.
+"""
+author = "TractorJuice"
+repository = "https://github.com/tractorjuice/arckit-vibe"
+license = "MIT"
+homepage = "https://tractorjuice.github.io/arc-kit/"
+
+[extension.feature_flags]
+enable_community_overlays = true
+enable_experimental = false
+
+[extension.mcp]
+servers = [
+    "aws-knowledge",
+    "microsoft-learn",
+    "google-developer-knowledge",
+    "govreposcrape",
+    "datacommons-mcp"
+]
+
+[extension.agents]
+files = [
+    "arckit-aws-research.toml",
+    "arckit-azure-research.toml",
+    "arckit-competitors-writer.toml",
+    "arckit-datascout-reader.toml",
+    "arckit-datascout-writer.toml",
+    "arckit-datascout.toml",
+    "arckit-framework.toml",
+    "arckit-gcp-research.toml",
+    "arckit-gov-code-search.toml",
+    "arckit-gov-landscape.toml",
+    "arckit-gov-reuse-reader.toml",
+    "arckit-gov-reuse-writer.toml",
+    "arckit-gov-reuse.toml",
+    "arckit-grants-reader.toml",
+    "arckit-grants-writer.toml",
+    "arckit-grants.toml",
+    "arckit-research.toml",
+    "arckit-tenders-reader.toml",
+    "arckit-tenders-writer.toml"
+]
+
+[extension.defaults]
+organisation_name = ""
+default_classification = "OFFICIAL"
+governance_framework = "Generic"
+classification_scheme = "UK"
+path_prefix = "${VIBE_EXTENSION_ROOT}"
+templates_dir = ".arckit/templates"
+custom_templates_dir = ".arckit/templates-custom"
