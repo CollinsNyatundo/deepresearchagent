@@ -116,6 +116,24 @@ async def _lifespan(app: FastAPI):  # noqa: ARG001
             _client.table("workspaces").select("id").limit(1).execute
         )
         logger.info("Supabase connectivity check passed.")
+        
+        import os
+        if os.environ.get("DEV_AUTH_BYPASS", "false").lower() == "true":
+            dev_ws_id = "11111111-1111-1111-1111-111111111111"
+            try:
+                ws_res = await asyncio.to_thread(
+                    _client.table("workspaces").select("id").eq("id", dev_ws_id).execute
+                )
+                if not ws_res.data:
+                    logger.info(f"Creating dev bypass workspace: {dev_ws_id}")
+                    await asyncio.to_thread(
+                        _client.table("workspaces").insert({
+                            "id": dev_ws_id,
+                            "name": "Dev Workspace",
+                        }).execute
+                    )
+            except Exception as _dev_ws_err:
+                logger.warning(f"Could not ensure dev bypass workspace in database: {_dev_ws_err}")
     except Exception as _sb_err:
         logger.error(
             f"Supabase connectivity check FAILED on startup: {_sb_err}\n"
@@ -1852,8 +1870,9 @@ async def list_workspaces(user_data: dict = Depends(verify_supabase_jwt)):
 
     # Dev-bypass: return a synthetic local workspace so the UI is fully functional
     # without requiring Supabase workspace tables to be seeded.
+    # We use a valid UUID to prevent PostgreSQL parsing errors.
     if user_id == "dev-bypass-user":
-        return [{"id": "dev-workspace", "name": "Dev Workspace", "created_at": "2024-01-01T00:00:00Z"}]
+        return [{"id": "11111111-1111-1111-1111-111111111111", "name": "Dev Workspace", "created_at": "2024-01-01T00:00:00Z"}]
 
     client = get_supabase_client()
     try:
@@ -1884,10 +1903,20 @@ async def create_workspace(workspace: WorkspaceCreate, user_data: dict = Depends
     if not workspace.name or not workspace.name.strip():
         raise HTTPException(status_code=400, detail="Workspace name cannot be empty")
 
-    # Dev-bypass: return a synthetic workspace without touching Supabase.
+    # Dev-bypass: return a synthetic workspace, inserting it to satisfy foreign key constraints.
     if user_id == "dev-bypass-user":
-        import time
-        ws_id = f"dev-workspace-{int(time.time())}"
+        import uuid
+        ws_id = str(uuid.uuid4())
+        try:
+            client = get_supabase_client()
+            await asyncio.to_thread(
+                client.table("workspaces").insert({
+                    "id": ws_id,
+                    "name": workspace.name.strip(),
+                }).execute
+            )
+        except Exception as _err:
+            logger.warning(f"Could not save synthetic workspace to DB: {_err}")
         return {"id": ws_id, "name": workspace.name.strip(), "created_at": datetime.now(UTC).isoformat()}
 
     client = get_supabase_client()
