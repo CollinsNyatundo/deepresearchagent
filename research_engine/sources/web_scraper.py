@@ -360,18 +360,13 @@ class WebScraper:
                 logger.warning(f"Error closing stealthy camoufox session: {e}")
             self._stealthy_camoufox_session = None
 
-    async def fetch_page(
+    async def _check_cache_and_circuit(
         self,
         url: str,
-        query: str | None = None,
-        upgrade_context: bool = False,
-        on_progress = None,
-    ) -> ScrapedPage:
-        """Fetch a single page with automatic 4-tier fetcher fallback.
-
-        Returns a ScrapedPage with extracted content or error details.
-        """
-        # Check domain-scoped circuit breaker
+        upgrade_context: bool,
+        on_progress,
+    ) -> ScrapedPage | None:
+        """Check domain circuit breaker and page cache. Returns a ScrapedPage if cached/blocked, else None."""
         if self.circuit_breaker:
             if not self.circuit_breaker.check_circuit(url):
                 logger.warning(f"Circuit Breaker tripped for {url}. Fail-fast skip.")
@@ -383,13 +378,99 @@ class WebScraper:
                     error="Circuit breaker is open for this domain",
                 )
 
-        # Check local page cache (skip if upgrade_context)
         if self.cache_manager and not upgrade_context:
             cached = await self.cache_manager.get_scraped_page(url)
             if cached:
                 if on_progress:
                     await on_progress(url, "CACHE_HIT", {"content_length": cached.content_length})
                 return cached
+        return None
+
+    async def _try_fetcher_tier(
+        self,
+        fetcher_name: str,
+        fetcher_fn,
+        url: str,
+        query: str | None,
+        upgrade_context: bool,
+        on_progress,
+        original_status: int | None,
+        fallback_attempts: list[str],
+    ) -> tuple[ScrapedPage | None, int | None, str]:
+        """Attempt execution of a single scraper fetcher tier."""
+        last_error = ""
+        try:
+            logger.debug(f"[{fetcher_name}] Trying {url}")
+            if on_progress:
+                await on_progress(url, "TRYING_TIER", {"fetcher": fetcher_name})
+            page = await fetcher_fn(url)
+
+            status = getattr(page, "status", None)
+            if original_status is None:
+                original_status = status
+
+            fallback_attempts.append(f"{fetcher_name}: status {status}")
+
+            if page is not None and status == 200:
+                scraped = self._extract_content(page, url, fetcher_name, query=query, upgrade_context=upgrade_context)
+                if scraped.content_length >= 50:
+                    logger.info(
+                        f"✓ [{fetcher_name}] Scraped {url} "
+                        f"({scraped.content_length:,} chars)"
+                    )
+                    scraped.original_status = original_status
+                    scraped.fallback_attempts = fallback_attempts
+
+                    # Register success on circuit breaker and save to cache
+                    if self.circuit_breaker:
+                        self.circuit_breaker.register_success(url)
+                    if self.cache_manager and not upgrade_context:
+                        await self.cache_manager.set_scraped_page(scraped)
+
+                    if on_progress:
+                        await on_progress(url, "COMPLETE", {
+                            "fetcher": fetcher_name,
+                            "content_length": scraped.content_length
+                        })
+                    return scraped, original_status, last_error
+                else:
+                    logger.warning(
+                        f"[{fetcher_name}] Got 200 but empty/near-empty content "
+                        f"({scraped.content_length} chars) for {url}, trying next tier"
+                    )
+                    last_error = f"Empty content ({scraped.content_length} chars)"
+            else:
+                logger.warning(
+                    f"[{fetcher_name}] Status {status} for {url}, trying next tier"
+                )
+                last_error = f"HTTP {status}"
+
+        except ImportError as e:
+            logger.warning(f"[{fetcher_name}] Not available: {e}")
+            last_error = f"ImportError: {e}"
+            fallback_attempts.append(f"{fetcher_name}: ImportError")
+        except Exception as e:
+            logger.warning(f"[{fetcher_name}] Failed for {url}: {type(e).__name__}: {e}")
+            last_error = f"{type(e).__name__}: {e}"
+            fallback_attempts.append(f"{fetcher_name}: {type(e).__name__}: {e}")
+
+        return None, original_status, last_error
+
+    async def fetch_page(
+        self,
+        url: str,
+        query: str | None = None,
+        upgrade_context: bool = False,
+        on_progress = None,
+    ) -> ScrapedPage:
+        """Fetch a single page with automatic 4-tier fetcher fallback.
+
+        Returns a ScrapedPage with extracted content or error details.
+        """
+        # Check cache and circuit breaker via helper
+        cached_or_blocked = await self._check_cache_and_circuit(url, upgrade_context, on_progress)
+        if cached_or_blocked is not None:
+            return cached_or_blocked
 
         # Rewrite arXiv PDF URLs to abstract pages for high-reliability scraping
         if "arxiv.org/pdf/" in url:
@@ -421,62 +502,11 @@ class WebScraper:
         original_status: int | None = None
 
         for fetcher_name, fetcher_fn in chain:
-            try:
-                logger.debug(f"[{fetcher_name}] Trying {url}")
-                if on_progress:
-                    await on_progress(url, "TRYING_TIER", {"fetcher": fetcher_name})
-                page = await fetcher_fn(url)
-
-                status = getattr(page, "status", None)
-                if original_status is None:
-                    original_status = status
-
-                fallback_attempts.append(f"{fetcher_name}: status {status}")
-
-                if page is not None and status == 200:
-                    scraped = self._extract_content(page, url, fetcher_name, query=query, upgrade_context=upgrade_context)
-                    if scraped.content_length >= 50:
-                        logger.info(
-                            f"✓ [{fetcher_name}] Scraped {url} "
-                            f"({scraped.content_length:,} chars)"
-                        )
-                        scraped.original_status = original_status
-                        scraped.fallback_attempts = fallback_attempts
-
-                        # Register success on circuit breaker and save to cache
-                        if self.circuit_breaker:
-                            self.circuit_breaker.register_success(url)
-                        if self.cache_manager and not upgrade_context:
-                            await self.cache_manager.set_scraped_page(scraped)
-
-                        if on_progress:
-                            await on_progress(url, "COMPLETE", {
-                                "fetcher": fetcher_name,
-                                "content_length": scraped.content_length
-                            })
-                        return scraped
-                    else:
-                        logger.warning(
-                            f"[{fetcher_name}] Got 200 but empty/near-empty content "
-                            f"({scraped.content_length} chars) for {url}, trying next tier"
-                        )
-                        last_error = f"Empty content ({scraped.content_length} chars)"
-                else:
-                    logger.warning(
-                        f"[{fetcher_name}] Status {status} for {url}, trying next tier"
-                    )
-                    last_error = f"HTTP {status}"
-
-            except ImportError as e:
-                logger.warning(f"[{fetcher_name}] Not available: {e}")
-                last_error = f"ImportError: {e}"
-                fallback_attempts.append(f"{fetcher_name}: ImportError")
-                continue
-            except Exception as e:
-                logger.warning(f"[{fetcher_name}] Failed for {url}: {type(e).__name__}: {e}")
-                last_error = f"{type(e).__name__}: {e}"
-                fallback_attempts.append(f"{fetcher_name}: {type(e).__name__}: {e}")
-                continue
+            scraped, original_status, last_error = await self._try_fetcher_tier(
+                fetcher_name, fetcher_fn, url, query, upgrade_context, on_progress, original_status, fallback_attempts
+            )
+            if scraped is not None:
+                return scraped
 
         logger.error(f"✗ All fetchers failed for {url}. Last error: {last_error}")
 
@@ -537,6 +567,47 @@ class WebScraper:
         chain: list[tuple[str, object]] = []
         tier = self.config.fetcher_tier.lower()
         timeout_s = self.config.timeout_ms / 1000
+
+        # ── Tier 0: Parallel AI CLI (if installed) ──────────────────────────────
+        import shutil
+        parallel_cli_installed = shutil.which("parallel-cli") is not None
+        if parallel_cli_installed:
+            async def _parallel_cli_fetch(url: str, _timeout: float = timeout_s):
+                import json
+                # Run parallel-cli extract <url> --full-content --json
+                cmd = ["parallel-cli", "extract", url, "--full-content", "--json"]
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    try:
+                        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_timeout)
+                    except asyncio.TimeoutError:
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
+                        raise TimeoutError("parallel-cli extraction timed out")
+
+                    if proc.returncode != 0:
+                        err_msg = stderr.decode().strip()
+                        raise RuntimeError(f"parallel-cli failed with code {proc.returncode}: {err_msg}")
+
+                    data = json.loads(stdout.decode())
+                    results = data.get("results", []) or data.get("data", []) or [data]
+                    if not results:
+                        raise ValueError("parallel-cli returned empty results")
+                    result = results[0]
+                    content = result.get("full_content", "") or result.get("content", "") or result.get("text", "") or result.get("extracted_content", "")
+                    title = result.get("title", "")
+                    return MockResponse(status=200, text=content, title=title)
+                except Exception as e:
+                    logger.warning(f"parallel-cli fetch failed: {e}")
+                    raise e
+
+            chain.append(("parallel_cli", _parallel_cli_fetch))
 
         # ── Tier 0a: Parallel AI Extract (if API key available) ─────────────────
         if self.config.parallel_api_key:
@@ -602,9 +673,10 @@ class WebScraper:
         if availability.get("async") and tier != "stealthy_only":
             async def _async_fetch(url: str, _timeout: float = timeout_s):
                 from scrapling.fetchers import AsyncFetcher
-                # AsyncFetcher.get() is a coroutine — await directly, NOT to_thread
+                # Fast-fail static timeout to fall back to browser fetchers faster
+                static_timeout = min(8.0, _timeout)
                 fetcher = AsyncFetcher()
-                return await fetcher.get(url, follow_redirects=True, timeout=_timeout)
+                return await fetcher.get(url, follow_redirects=True, timeout=static_timeout)
 
             chain.append(("async_fetcher", _async_fetch))
 
@@ -681,8 +753,9 @@ class WebScraper:
             async def _basic_fetch(url: str, _timeout: float = timeout_s):
                 from scrapling.fetchers import Fetcher
                 fetcher = Fetcher()
+                static_timeout = min(8.0, _timeout)
                 return await asyncio.to_thread(
-                    fetcher.get, url, follow_redirects=True, timeout=_timeout
+                    fetcher.get, url, follow_redirects=True, timeout=static_timeout
                 )
 
             chain.append(("basic_fetcher", _basic_fetch))
@@ -690,23 +763,23 @@ class WebScraper:
 
         return chain
 
-    def _extract_content(self, page, url: str, fetcher_name: str, query: str | None = None, upgrade_context: bool = False) -> ScrapedPage:
-        """Extract text content from a Scrapling v0.4.5 Response object.
-
-        Includes DOM-based boilerplate removal using BoilerplateStripper before extraction.
-        """
-        title = ""
-        content = ""
-
-        # ── Extract title ──────────────────────────────────────────────────
+    def _extract_page_title(self, page) -> str:
+        """Safely extract the page title from Response object."""
         try:
             title_el = page.find("title")
             if title_el is not None:
-                title = (title_el.text or "").strip()
+                return (title_el.text or "").strip()
         except Exception:
             pass
+        return ""
 
-        # ── Extract body HTML & Run Boilerplate Stripping ──────────────────
+    def _extract_body_html_and_strip_boilerplate(
+        self,
+        page,
+        url: str,
+        upgrade_context: bool,
+    ) -> str:
+        """Extract body HTML and strip boilerplate content using BoilerplateStripper."""
         html_str = ""
         try:
             html_val = getattr(page, "html_content", "")
@@ -728,32 +801,47 @@ class WebScraper:
             try:
                 parser = BoilerplateStripper()
                 parser.feed(html_str)
-                content = parser.get_cleaned_text()
+                return parser.get_cleaned_text()
             except Exception as e:
                 logger.warning(f"Boilerplate stripping failed for {url}: {e}, falling back to get_all_text")
-                content = ""
+        return ""
+
+    def _extract_fallback_text(self, page, url: str) -> str:
+        """Extract text from page when parser stripping fails or is skipped."""
+        try:
+            raw_text = page.get_all_text()
+            if isinstance(raw_text, str):
+                return raw_text
+            elif raw_text is not None:
+                return str(raw_text)
+        except AttributeError:
+            # Fallback: decode raw bytes body
+            try:
+                raw = getattr(page, "body", b"")
+                if isinstance(raw, bytes):
+                    return raw.decode("utf-8", errors="ignore")
+                elif isinstance(raw, str):
+                    return raw
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning(f"Content extraction failed for {url}: {e}")
+        return ""
+
+    def _extract_content(self, page, url: str, fetcher_name: str, query: str | None = None, upgrade_context: bool = False) -> ScrapedPage:
+        """Extract text content from a Scrapling v0.4.5 Response object.
+
+        Includes DOM-based boilerplate removal using BoilerplateStripper before extraction.
+        """
+        # ── Extract title ──────────────────────────────────────────────────
+        title = self._extract_page_title(page)
+
+        # ── Extract body HTML & Run Boilerplate Stripping ──────────────────
+        content = self._extract_body_html_and_strip_boilerplate(page, url, upgrade_context)
 
         # ── Fallback: Extract standard body text ───────────────────────────
         if not content:
-            try:
-                raw_text = page.get_all_text()
-                if isinstance(raw_text, str):
-                    content = raw_text
-                elif raw_text is not None:
-                    content = str(raw_text)
-            except AttributeError:
-                # Fallback: decode raw bytes body
-                try:
-                    raw = getattr(page, "body", b"")
-                    if isinstance(raw, bytes):
-                        content = raw.decode("utf-8", errors="ignore")
-                    elif isinstance(raw, str):
-                        content = raw
-                except Exception:
-                    content = ""
-            except Exception as e:
-                logger.warning(f"Content extraction failed for {url}: {e}")
-                content = ""
+            content = self._extract_fallback_text(page, url)
 
         # ── Clean and truncate ─────────────────────────────────────────────
         content = _clean_content(content)

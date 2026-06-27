@@ -74,12 +74,86 @@ async def _evaluate_relevance(
         snippet=result.snippet,
     )
     try:
-        res = await llm.call_structured(prompt, RelevanceEvaluation, model=model, provider=provider)
+        res = await llm.call_structured(prompt, RelevanceEvaluation, model=model, provider=provider, use_cache=True)
         eval_res = RelevanceEvaluation(**res)
         return result, eval_res.score, eval_res.rationale
     except Exception as e:
         logger.warning(f"Relevance evaluation failed for {result.url}: {e}. Defaulting to 1.0.")
         return result, 1.0, f"Evaluation fallback due to error: {e}"
+
+
+async def _evaluate_relevance_batch(
+    results: list[SearchResult],
+    sub_query: str,
+    llm: LLMProvider,
+    model: str | None = None,
+    provider: str | None = None,
+) -> list[tuple[SearchResult, float, str]]:
+    """Batch relevance check for multiple SearchResults in a single LLM call."""
+    from research_engine.llm.prompts import BATCH_RELEVANCE_EVALUATION_TEMPLATE
+    from research_engine.models import BatchRelevanceEvaluation
+
+    # 1. Filter out empty or too short snippets (AutoPass)
+    results_to_eval: list[tuple[int, SearchResult]] = []
+    autopassed: dict[int, tuple[float, str]] = {}
+
+    for idx, r in enumerate(results):
+        if not r.snippet or len(r.snippet.strip()) < 20:
+            autopassed[idx] = (0.8, "AutoPass: Snippet is empty or too short to evaluate. Passing to scraper.")
+        else:
+            results_to_eval.append((idx, r))
+
+    if not results_to_eval:
+        # All were autopassed!
+        eval_results = []
+        for idx, r in enumerate(results):
+            score, rationale = autopassed[idx]
+            eval_results.append((r, score, rationale))
+        return eval_results
+
+    # 2. Build the snippets text list
+    snippets_list = "\n".join(
+        f"[{i}] Title: {r.title or '(no title)'}\n    Snippet: {r.snippet}"
+        for i, r in results_to_eval
+    )
+
+    prompt = BATCH_RELEVANCE_EVALUATION_TEMPLATE.format(
+        sub_query=sub_query,
+        snippets_list=snippets_list,
+    )
+
+    try:
+        res = await llm.call_structured(prompt, BatchRelevanceEvaluation, model=model, provider=provider, use_cache=True)
+        eval_output = BatchRelevanceEvaluation(**res)
+        
+        # Map evaluations back by index
+        scores_by_idx: dict[int, tuple[float, str]] = {}
+        for item in eval_output.evaluations:
+            scores_by_idx[item.index] = (item.score, item.rationale)
+
+        # Merge results
+        eval_results = []
+        for idx, r in enumerate(results):
+            if idx in autopassed:
+                score, rationale = autopassed[idx]
+                eval_results.append((r, score, rationale))
+            elif idx in scores_by_idx:
+                score, rationale = scores_by_idx[idx]
+                eval_results.append((r, score, rationale))
+            else:
+                # LLM missed or returned invalid index, default to 1.0 (pass)
+                logger.warning(f"Batch eval missed index {idx} for {r.url}. Defaulting to 1.0.")
+                eval_results.append((r, 1.0, "AutoPass: Index missing in batch evaluation response."))
+        return eval_results
+
+    except Exception as e:
+        logger.warning(f"Batch relevance evaluation failed: {e}. Falling back to pointwise evaluation.")
+        # Fall back to pointwise evaluation in parallel
+        tasks = [
+            _evaluate_relevance(r, sub_query, llm, model=model, provider=provider)
+            for r in results
+        ]
+        return await asyncio.gather(*tasks)
 
 
 async def search_and_scrape(
@@ -143,14 +217,12 @@ async def search_and_scrape(
                 other_results.append(r)
         search_results = prioritized_results + other_results
 
-    # Step 2: Pointwise relevance filter (AutoEval)
+    # Step 2: Relevance filter (AutoEval)
     if llm and search_results:
-        logger.info(f"Running pointwise relevance AutoEval on {len(search_results)} search results...")
-        tasks = [
-            _evaluate_relevance(r, query.query, llm, model=model, provider=provider)
-            for r in search_results
-        ]
-        eval_results = await asyncio.gather(*tasks)
+        logger.info(f"Running relevance AutoEval on {len(search_results)} search results...")
+        eval_results = await _evaluate_relevance_batch(
+            search_results, query.query, llm, model=model, provider=provider
+        )
 
         # Attach scores to SearchResult models
         for r, score, rationale in eval_results:

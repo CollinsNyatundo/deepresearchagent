@@ -351,3 +351,29 @@ Return JSON:
   "rationale": "Explain briefly why the snippet is relevant or irrelevant"
 }}
 """
+
+BATCH_RELEVANCE_EVALUATION_TEMPLATE = """\
+You are an expert information relevance assessor. Rate the relevance of these search result snippets against the target sub-query.
+
+Target Sub-query: {sub_query}
+
+SearchResult Snippets:
+{snippets_list}
+
+For each snippet, evaluate if it contains useful, relevant, and credible context that answers the sub-query.
+Rate your confidence/relevance score:
+- score: 0.0 (completely irrelevant, spam, or ad) to 1.0 (highly relevant, directly answers query, high-signal content).
+- score must be between 0.0 and 1.0.
+
+Return JSON:
+{{
+  "evaluations": [
+    {{
+      "index": 0,
+      "score": 0.85,
+      "rationale": "Explain briefly why snippet 0 is relevant or irrelevant"
+    }},
+    ...
+  ]
+}}
+"""

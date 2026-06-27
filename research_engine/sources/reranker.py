@@ -96,7 +96,7 @@ async def rerank_results(
     prompt = RERANKING_PROMPT.format(query=query, results_text=results_text)
 
     try:
-        output = await llm.call_structured(prompt, RerankingOutput, model=model, provider=provider)
+        output = await llm.call_structured(prompt, RerankingOutput, model=model, provider=provider, use_cache=True)
         if isinstance(output, dict):
             output = RerankingOutput(**output)
 
