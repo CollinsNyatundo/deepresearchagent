@@ -1,27 +1,16 @@
-import { Suspense, lazy } from 'react'
 import { AuthModal } from './Auth/AuthModal'
-
-const MoonlitRipple = lazy(() => import('./backgrounds/MoonlitRipple'))
+import authBg from '../assets/auth_bg.png'
 
 export default function LoginPrompt() {
   return (
-    <div className="h-screen w-full relative overflow-hidden">
-      {/* Cinematic background - unchanged per user request */}
-      <div className="absolute inset-0 z-0">
-        <Suspense fallback={<div className="w-full h-full bg-[#050505]" />}>
-          <MoonlitRipple />
-        </Suspense>
-      </div>
+    <div 
+      className="h-screen w-full relative overflow-hidden flex items-center justify-center px-4 bg-black bg-cover bg-center select-none"
+      style={{ backgroundImage: `url(${authBg})` }}
+    >
+      {/* Soft gold backdrop glow behind the glass modal for depth */}
+      <div className="absolute w-[400px] h-[400px] rounded-full bg-[#c8956c]/5 blur-[120px] pointer-events-none" />
 
-      {/* Centered glass panel */}
-      <div className="absolute inset-0 z-10 flex items-center justify-center px-4">
-        <div 
-          className="liquid-glass-strong rounded-[2rem] p-8 w-full max-w-sm"
-          style={{ background: 'rgba(255, 255, 255, 0.02)' }}
-        >
-          <AuthModal opened={true} />
-        </div>
-      </div>
+      <AuthModal opened={true} />
     </div>
   )
 }
