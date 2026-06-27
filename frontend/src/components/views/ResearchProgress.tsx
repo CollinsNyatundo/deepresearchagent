@@ -94,7 +94,6 @@ export function ResearchProgress({ events, isActive }: Props) {
   const [scrapeProgress, setScrapeProgress] = useState<Record<string, any>>({});
   const [openCycles, setOpenCycles] = useState<Set<number>>(new Set());
   const [thinkingOpen, setThinkingOpen] = useState(true);
-  const timelineEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const cycleMap: Record<number, CycleData> = {};
@@ -186,9 +185,33 @@ export function ResearchProgress({ events, isActive }: Props) {
     setScrapeProgress(nextScrapeProgress);
   }, [events]);
 
+  // Smart auto-scroll for main container
+  const containerRef = useRef<HTMLDivElement>(null);
+  const isAutoScrollRef = useRef(true);
+  const thinkingRef = useRef<HTMLDivElement>(null);
+
+  const handleScroll = () => {
+    const el = containerRef.current;
+    if (!el) return;
+    const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    isAutoScrollRef.current = isAtBottom;
+  };
+
   useEffect(() => {
-    timelineEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = containerRef.current;
+    if (!el || !isAutoScrollRef.current) return;
+    el.scrollTo({
+      top: el.scrollHeight,
+      behavior: 'smooth',
+    });
   }, [events.length]);
+
+  // Auto-scroll thinking box as chunks stream in
+  useEffect(() => {
+    if (thinkingRef.current) {
+      thinkingRef.current.scrollTop = thinkingRef.current.scrollHeight;
+    }
+  }, [thinkingText]);
 
   const stateConfig = STATE_CONFIG[currentState] || STATE_CONFIG.initializing;
 
@@ -198,7 +221,11 @@ export function ResearchProgress({ events, isActive }: Props) {
   );
 
   return (
-    <div className="flex flex-col gap-6">
+    <div
+      ref={containerRef}
+      onScroll={handleScroll}
+      className="flex-1 overflow-y-auto p-6 flex flex-col gap-6 h-full"
+    >
       {/* ─── Status Header ─────────────────────────────────── */}
       <div className="liquid-glass p-6 rounded-xl">
         <div className="flex items-center justify-between gap-4">
@@ -357,6 +384,7 @@ export function ResearchProgress({ events, isActive }: Props) {
                 <span className="w-[30px]" />
               </div>
               <div
+                ref={thinkingRef}
                 className={`font-mono p-4 overflow-y-auto whitespace-pre-wrap ${
                   isActive && currentState !== 'complete' ? 'blink-cursor' : ''
                 }`}
@@ -827,8 +855,6 @@ export function ResearchProgress({ events, isActive }: Props) {
               );
             })}
         </div>
-
-        <div ref={timelineEndRef} />
       </div>
     </div>
   );

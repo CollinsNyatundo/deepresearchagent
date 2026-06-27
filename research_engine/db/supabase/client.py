@@ -79,3 +79,40 @@ def get_supabase_client() -> Client:
         logger.error(f"Failed to create Supabase client: {e}")
         raise
 
+
+_supabase_async_client = None
+
+
+async def get_supabase_async_client():
+    """Retrieve or initialize the Supabase AsyncClient.
+
+    This client is required for Supabase Realtime functionality.
+    """
+    global _supabase_async_client
+    if _supabase_async_client is not None:
+        return _supabase_async_client
+
+    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_key = os.environ.get("SUPABASE_KEY")
+
+    if not supabase_url or not supabase_key:
+        logger.error(
+            "SUPABASE_URL or SUPABASE_KEY not set in environment. "
+            "All database operations will fail."
+        )
+        raise RuntimeError("Supabase credentials missing in environment.")
+
+    try:
+        from supabase import create_async_client
+        _supabase_async_client = await create_async_client(supabase_url, supabase_key)
+        
+        # Connect to the realtime websocket
+        if not _supabase_async_client.realtime.is_connected:
+            logger.info("Connecting to Supabase Realtime socket...")
+            await _supabase_async_client.realtime.connect()
+            
+        return _supabase_async_client
+    except Exception as e:
+        logger.error(f"Failed to create Supabase async client: {e}")
+        raise
+

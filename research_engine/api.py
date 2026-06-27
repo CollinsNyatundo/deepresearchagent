@@ -144,6 +144,14 @@ async def _lifespan(app: FastAPI):  # noqa: ARG001
 
     yield
 
+    try:
+        from research_engine.db.supabase.client import _supabase_async_client
+        if _supabase_async_client is not None:
+            logger.info("Closing Supabase Realtime websocket connection...")
+            await _supabase_async_client.realtime.close()
+    except Exception as e:
+        logger.warning(f"Failed to close Supabase async client realtime: {e}")
+
 
 app = FastAPI(
     title="Deep Research Agent",

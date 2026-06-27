@@ -1,8 +1,21 @@
 import asyncio
+import sys
 import subprocess
 from pathlib import Path
 
 OPENKB_BASE_DIR = Path("openkb")
+
+
+def get_openkb_executable() -> str:
+    """Retrieve the path to the openkb executable, checking the venv first."""
+    python_dir = Path(sys.executable).parent
+    openkb_exe = python_dir / "openkb.exe"
+    if openkb_exe.exists():
+        return str(openkb_exe)
+    openkb_bin = python_dir / "openkb"
+    if openkb_bin.exists():
+        return str(openkb_bin)
+    return "openkb"
 
 
 def get_workspace_kb_dir(workspace_id: str) -> Path:
@@ -16,7 +29,7 @@ async def ensure_kb_initialized(workspace_id: str) -> Path:
     if not config_path.exists():
         kb_dir.mkdir(parents=True, exist_ok=True)
         proc = await asyncio.create_subprocess_exec(
-            "openkb", "init",
+            get_openkb_executable(), "init",
             cwd=kb_dir,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -33,7 +46,7 @@ async def run_openkb_command(workspace_id: str, *args) -> str:
     kb_dir = get_workspace_kb_dir(workspace_id)
     await ensure_kb_initialized(workspace_id)
     proc = await asyncio.create_subprocess_exec(
-        "openkb", *args,
+        get_openkb_executable(), *args,
         cwd=kb_dir,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE

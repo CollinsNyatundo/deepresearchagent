@@ -968,14 +968,13 @@ class DeepResearchOrchestrator:
         current_run_id = getattr(self, "current_run_id", None)
         if current_run_id:
             try:
-                from research_engine.db.supabase.client import get_supabase_client
-                client = get_supabase_client()
+                from research_engine.db.supabase.client import get_supabase_async_client
+                async_client = await get_supabase_async_client()
                 channel_name = f"research_run:{current_run_id}"
-                client.channel(channel_name).send({
-                    "type": "broadcast",
-                    "event": event_name,
-                    "payload": data
-                })
+                channel = async_client.channel(channel_name)
+                if not channel.is_joined:
+                    await channel.subscribe()
+                await channel.send_broadcast(event_name, data)
             except Exception as e:
                 logger.warning(f"Failed to broadcast via Supabase Realtime: {e}")
 
