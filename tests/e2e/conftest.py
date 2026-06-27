@@ -247,8 +247,10 @@ class MockQueryBuilder:
 class MockChannel:
     def __init__(self, name: str):
         self.name = name
+        self.is_joined = False
 
-    def subscribe(self):
+    async def subscribe(self):
+        self.is_joined = True
         return self
 
     def send(self, data: dict):
@@ -256,7 +258,27 @@ class MockChannel:
         mock_broadcasts.append((self.name, data))
         return self
 
+    async def send_broadcast(self, event: str, payload: dict):
+        global mock_broadcasts
+        mock_broadcasts.append((self.name, {"event": event, "payload": payload}))
+        return self
+
+
+class MockRealtime:
+    def __init__(self):
+        self.is_connected = False
+
+    async def connect(self):
+        self.is_connected = True
+
+    async def close(self):
+        self.is_connected = False
+
+
 class MockSupabaseClient:
+    def __init__(self):
+        self.realtime = MockRealtime()
+
     def table(self, name: str) -> MockQueryBuilder:
         return MockQueryBuilder(name)
 
@@ -508,9 +530,13 @@ async def list_workspace_members(workspace_id: str, user_data: dict = Depends(ve
 def apply_e2e_patches():
     """Apply global E2E mock patches for LLM, Search, WebScraper, and Database."""
     # 1. Database patch
+    async def mock_get_supabase_async_client():
+        return mock_supabase_client
+
     db_patchers = [
         mock.patch("research_engine.api.get_supabase_client", return_value=mock_supabase_client),
         mock.patch("research_engine.db.supabase.client.get_supabase_client", return_value=mock_supabase_client),
+        mock.patch("research_engine.db.supabase.client.get_supabase_async_client", mock_get_supabase_async_client),
     ]
 
     # 2. LLM Provider patch

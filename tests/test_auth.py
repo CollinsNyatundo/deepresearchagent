@@ -87,3 +87,42 @@ def test_get_telemetry_unauthorized():
     """Verify that GET /api/telemetry returns 401 without token."""
     response = client.get("/api/telemetry")
     assert response.status_code == 401
+
+
+def test_dev_bypass_workspaces(monkeypatch):
+    """Verify that under dev bypass mode, GET /workspaces returns the synthetic UUID workspace."""
+    from research_engine import auth
+    monkeypatch.setattr(auth, "_is_dev_bypass", lambda: True)
+    
+    response = client.get("/workspaces", headers={"Authorization": "Bearer bypass"})
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["id"] == "11111111-1111-1111-1111-111111111111"
+    assert data[0]["name"] == "Dev Workspace"
+
+
+def test_dev_bypass_create_workspace(monkeypatch):
+    """Verify that under dev bypass mode, POST /workspaces generates a valid UUID workspace."""
+    from research_engine import auth
+    monkeypatch.setattr(auth, "_is_dev_bypass", lambda: True)
+    
+    from unittest.mock import MagicMock
+    mock_client = MagicMock()
+    mock_client.table.return_value.insert.return_value.execute.return_value = MagicMock(data=[])
+    
+    monkeypatch.setattr("research_engine.api.get_supabase_client", lambda: mock_client)
+    
+    response = client.post(
+        "/workspaces",
+        json={"name": "New Dev Workspace"},
+        headers={"Authorization": "Bearer bypass"}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "id" in data
+    
+    import uuid
+    val = uuid.UUID(data["id"])
+    assert val is not None
+    assert data["name"] == "New Dev Workspace"
