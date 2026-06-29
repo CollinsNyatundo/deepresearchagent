@@ -19,15 +19,18 @@ class ResearchContext:
     - Full typed trace (list of ResearchStep objects)
     """
 
-    def __init__(self):
+    def __init__(self, max_history_steps: int | None = 5):
         self._history: list[tuple[str, str]] = []  # (query, answer)
         self._trace: list[ResearchStep] = []
         self._lock = asyncio.Lock()
+        self.max_history_steps = max_history_steps
 
     async def add_qa(self, query: str, answer: str) -> None:
-        """Append a query-answer pair to the history."""
+        """Append a query-answer pair to the history, enforcing rolling memory limit."""
         async with self._lock:
             self._history.append((query, answer))
+            if self.max_history_steps is not None and len(self._history) > self.max_history_steps:
+                self._history.pop(0)
 
     async def add_step(self, step: ResearchStep) -> None:
         """Append a full research step to the trace."""

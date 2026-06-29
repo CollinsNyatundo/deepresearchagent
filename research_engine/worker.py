@@ -43,11 +43,14 @@ async def run_scraper_task(payload: dict):
     logger.info(f"Worker starting research job: {payload}")
     try:
         from research_engine.agent.orchestrator import DeepResearchOrchestrator
-        from research_engine.config import get_config
+        from research_engine.config import get_config, workspace_id_var
         from research_engine.models import ResearchRequest
 
         config = get_config()
         orchestrator = DeepResearchOrchestrator(config)
+
+        # Set workspace context
+        workspace_id_var.set(payload["workspace_id"])
 
         # Prepare request
         req = ResearchRequest(

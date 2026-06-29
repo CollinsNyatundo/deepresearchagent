@@ -41,8 +41,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 import zipfile
+from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
@@ -120,6 +122,24 @@ async def _lifespan(app: FastAPI):  # noqa: ARG001
         import os
         if os.environ.get("DEV_AUTH_BYPASS", "false").lower() == "true":
             dev_ws_id = "11111111-1111-1111-1111-111111111111"
+            dev_user_id = "22222222-2222-2222-2222-222222222222"
+            
+            # Ensure dev bypass user exists in auth.users
+            try:
+                await asyncio.to_thread(
+                    _client.auth.admin.create_user, {
+                        "id": dev_user_id,
+                        "email": "dev-bypass-user@localhost",
+                        "password": "dev-bypass-password-123",
+                        "email_confirm": True,
+                        "user_metadata": {"role": "admin"}
+                    }
+                )
+                logger.info(f"Created dev bypass user: {dev_user_id}")
+            except Exception as _dev_user_err:
+                logger.info(f"Dev bypass user check/creation: {_dev_user_err}")
+
+            # Ensure dev bypass workspace exists
             try:
                 ws_res = await asyncio.to_thread(
                     _client.table("workspaces").select("id").eq("id", dev_ws_id).execute
@@ -134,6 +154,26 @@ async def _lifespan(app: FastAPI):  # noqa: ARG001
                     )
             except Exception as _dev_ws_err:
                 logger.warning(f"Could not ensure dev bypass workspace in database: {_dev_ws_err}")
+
+            # Ensure dev bypass user is member of dev bypass workspace
+            try:
+                member_res = await asyncio.to_thread(
+                    _client.table("workspace_members")
+                    .select("workspace_id")
+                    .eq("workspace_id", dev_ws_id)
+                    .eq("user_id", dev_user_id)
+                    .execute
+                )
+                if not member_res.data:
+                    logger.info(f"Adding dev bypass user {dev_user_id} to workspace {dev_ws_id}")
+                    await asyncio.to_thread(
+                        _client.table("workspace_members").insert({
+                            "workspace_id": dev_ws_id,
+                            "user_id": dev_user_id,
+                        }).execute
+                    )
+            except Exception as _dev_member_err:
+                logger.warning(f"Could not ensure dev bypass workspace membership: {_dev_member_err}")
     except Exception as _sb_err:
         logger.error(
             f"Supabase connectivity check FAILED on startup: {_sb_err}\n"
@@ -191,7 +231,7 @@ async def verify_workspace_membership(client, workspace_id: str, user_id: str) -
     block the workspace_members query and this will always raise 403 for valid
     members. Set SUPABASE_KEY to the service_role key in config.toml / env.
     """
-    if user_id == "dev-bypass-user":
+    if user_id == "22222222-2222-2222-2222-222222222222":
         return
     try:
         response = await asyncio.to_thread(
@@ -301,6 +341,7 @@ async def get_run_details(run_id: str, user_data: dict = Depends(verify_supabase
     await check_run_access(run_id, user_data)
     try:
         res = await asyncio.to_thread(load_run, run_id)
+        res.status = "complete"
         # Populate workspace_id
         client = get_supabase_client()
         workspace_id = await get_run_workspace_id(client, run_id)
@@ -308,7 +349,42 @@ async def get_run_details(run_id: str, user_data: dict = Depends(verify_supabase
             res.workspace_id = workspace_id
         return res
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+        client = get_supabase_client()
+        try:
+            response = await asyncio.to_thread(
+                client.table("research_runs").select("*").eq("id", run_id).execute
+            )
+            if not response.data:
+                raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+            row = response.data[0]
+            
+            from research_engine.models import ResearchPlan, ResearchResult
+            
+            started_at_str = row.get("created_at") or row.get("started_at")
+            started_at = datetime.fromisoformat(started_at_str) if started_at_str else datetime.now(UTC)
+            
+            res = ResearchResult(
+                run_id=run_id,
+                query=row["query"],
+                model_used=row.get("model_used") or config.llm.default_model,
+                plan=ResearchPlan(steps=[]),
+                final_plan=ResearchPlan(steps=[]),
+                steps=[],
+                report="",
+                citations=[],
+                progress=row.get("progress") or 0,
+                started_at=started_at,
+                completed_at=datetime.now(UTC),
+                errors=[],
+                workspace_id=row.get("workspace_id"),
+                status=row.get("status") or "initializing"
+            )
+            return res
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Fallback to Supabase failed for run details {run_id}: {e}")
+            raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
 
 
 @app.get("/runs/{run_id}/report")
@@ -428,6 +504,130 @@ async def start_research(request: ResearchRequest, user_data: dict = Depends(ver
         raise HTTPException(status_code=500, detail=f"Research failed: {str(e)}")
 
 
+class ActiveRun:
+    def __init__(self, run_id: str, task: asyncio.Task, orchestrator_queue: asyncio.Queue, client, is_plan: bool):
+        self.run_id = run_id
+        self.task = task
+        self.orchestrator_queue = orchestrator_queue
+        self.client = client
+        self.is_plan = is_plan
+        self.history = []
+        self.listeners = set()
+        self.is_done = False
+        self.distributor_task = None
+
+    def start_distributor(self):
+        self.distributor_task = asyncio.create_task(self.distribute_events())
+
+    async def distribute_events(self):
+        try:
+            while not self.task.done() or not self.orchestrator_queue.empty():
+                try:
+                    event = await asyncio.wait_for(self.orchestrator_queue.get(), timeout=1.0)
+                    self.history.append(event)
+                    for listener in list(self.listeners):
+                        try:
+                            listener.put_nowait(event)
+                        except Exception:
+                            pass
+                    event_name = event.get("event")
+                    if event_name in ("complete", "error"):
+                        self.is_done = True
+                except asyncio.TimeoutError:
+                    continue
+                except Exception as e:
+                    logger.error(f"Error in distribute_events loop for {self.run_id}: {e}")
+
+            if self.task.done():
+                exc = None
+                is_cancelled = False
+                try:
+                    exc = self.task.exception()
+                except asyncio.CancelledError:
+                    is_cancelled = True
+                except Exception as e:
+                    exc = e
+
+                if is_cancelled:
+                    logger.info(f"Research task {self.run_id} was cancelled.")
+                    try:
+                        await asyncio.to_thread(
+                            self.client.table("research_runs").update({
+                                "status": "failed",
+                                "completed_at": datetime.now(UTC).isoformat()
+                            }).eq("id", self.run_id).execute
+                        )
+                    except Exception as db_err:
+                        logger.error(f"Failed to update DB on task cancellation: {db_err}")
+                elif exc:
+                    logger.error(f"Research task {self.run_id} failed: {exc}")
+                    err_event = {
+                        "event": "error",
+                        "data": {"error": f"{type(exc).__name__}: {str(exc)}"}
+                    }
+                    self.history.append(err_event)
+                    for listener in list(self.listeners):
+                        try:
+                            listener.put_nowait(err_event)
+                        except Exception:
+                            pass
+                    try:
+                        await asyncio.to_thread(
+                            self.client.table("research_runs").update({
+                                "status": "failed",
+                                "completed_at": datetime.now(UTC).isoformat()
+                            }).eq("id", self.run_id).execute
+                        )
+                    except Exception as db_err:
+                        logger.error(f"Failed to update DB on task failure: {db_err}")
+                else:
+                    report_content = ""
+                    try:
+                        report_content = load_report(self.run_id)
+                    except Exception:
+                        pass
+                    try:
+                        await asyncio.to_thread(
+                            self.client.table("research_runs").update({
+                                "status": "complete",
+                                "progress": 100,
+                                "report": report_content,
+                                "completed_at": datetime.now(UTC).isoformat()
+                            }).eq("id", self.run_id).execute
+                        )
+                    except Exception as db_err:
+                        logger.error(f"Failed to update DB on task completion: {db_err}")
+        except Exception as e:
+            logger.error(f"Distributor main error for {self.run_id}: {e}")
+        finally:
+            self.is_done = True
+            async def delayed_remove():
+                await asyncio.sleep(300)
+                active_research_registry.remove(self.run_id)
+            asyncio.create_task(delayed_remove())
+
+class ActiveResearchRegistry:
+    def __init__(self):
+        self.runs = {}
+
+    def get(self, run_id: str) -> ActiveRun | None:
+        return self.runs.get(run_id)
+
+    def register(self, run_id: str, task: asyncio.Task, orchestrator_queue: asyncio.Queue, client, is_plan: bool) -> ActiveRun:
+        run = ActiveRun(run_id, task, orchestrator_queue, client, is_plan)
+        run.start_distributor()
+        self.runs[run_id] = run
+        return run
+
+    def remove(self, run_id: str):
+        if run_id in self.runs:
+            run = self.runs.pop(run_id)
+            if run.distributor_task and not run.distributor_task.done():
+                run.distributor_task.cancel()
+
+active_research_registry = ActiveResearchRegistry()
+
+
 @app.post("/research/stream")
 async def stream_research(request: ResearchRequest, user_data: dict = Depends(verify_supabase_jwt)):
     """Start research and stream progress via Server-Sent Events (Phase 2).
@@ -444,6 +644,8 @@ async def stream_research(request: ResearchRequest, user_data: dict = Depends(ve
     workspace_id = request.workspace_id
     if not workspace_id:
         raise HTTPException(status_code=400, detail="workspace_id is required")
+    from research_engine.config import workspace_id_var
+    workspace_id_var.set(workspace_id)
     user_id = user_data.get("sub")
     if not user_id:
         raise HTTPException(status_code=400, detail="Invalid user ID in token")
@@ -452,6 +654,75 @@ async def stream_research(request: ResearchRequest, user_data: dict = Depends(ve
     await verify_workspace_membership(client, workspace_id, user_id)
 
     run_id = request.run_id or _generate_run_id()
+
+    # Check if this run is already actively running
+    existing_run = active_research_registry.get(run_id)
+    if existing_run:
+        logger.info(f"Reconnecting client to active run {run_id}")
+        client_queue = asyncio.Queue()
+        for event in existing_run.history:
+            client_queue.put_nowait(event)
+        existing_run.listeners.add(client_queue)
+
+        async def event_generator():
+            completed_normally = False
+            try:
+                while True:
+                    if existing_run.is_done and client_queue.empty():
+                        completed_normally = True
+                        break
+                    try:
+                        event = await asyncio.wait_for(client_queue.get(), timeout=30.0)
+                        event_name = event.get("event", "message")
+                        event_data = json.dumps(event.get("data", {}))
+                        yield f"event: {event_name}\ndata: {event_data}\n\n"
+                        if event_name in ("complete", "error"):
+                            completed_normally = True
+                            break
+                    except asyncio.TimeoutError:
+                        yield ": heartbeat\n\n"
+            except asyncio.CancelledError:
+                logger.info(f"SSE client disconnected from active run {run_id}")
+            finally:
+                existing_run.listeners.discard(client_queue)
+                if not completed_normally and not existing_run.listeners:
+                    logger.info(f"No listeners left for active run {run_id}, cancelling research task")
+                    existing_run.task.cancel()
+                    try:
+                        await asyncio.to_thread(
+                            client.table("research_runs").update({
+                                "status": "failed",
+                                "completed_at": datetime.now(UTC).isoformat()
+                            }).eq("id", run_id).execute
+                        )
+                    except Exception as db_err:
+                        logger.error(f"Failed to update db on cancel: {db_err}")
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    elif not request.query:
+        # Reconnect failed because task is not active in registry
+        async def event_generator():
+            error_data = json.dumps({
+                "error": "Research run is no longer active in memory. It may have completed, failed, or the server restarted. Please check the sidebar to view details."
+            })
+            yield f"event: error\ndata: {error_data}\n\n"
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     # Insert / upsert the run record
     run_record = {
@@ -489,97 +760,44 @@ async def stream_research(request: ResearchRequest, user_data: dict = Depends(ve
         orchestrator.run(request, event_queue=event_queue, run_id=run_id)
     )
 
+    active_run = active_research_registry.register(run_id, research_task, event_queue, client, is_plan=False)
+
+    client_queue = asyncio.Queue()
+    active_run.listeners.add(client_queue)
+
     async def event_generator():
-        """Yield SSE-formatted events from the research queue."""
+        completed_normally = False
         try:
             while True:
-                # If research task is done and queue is empty, we are finished
-                if research_task.done() and event_queue.empty():
-                    exc = research_task.exception()
-                    if exc:
-                        error_data = json.dumps({
-                            "error": f"{type(exc).__name__}: {str(exc)}"
-                        })
-                        yield f"event: error\ndata: {error_data}\n\n"
-                        try:
-                            await asyncio.to_thread(
-                                client.table("research_runs").update({
-                                    "status": "failed",
-                                    "completed_at": datetime.now(UTC).isoformat()
-                                }).eq("id", run_id).execute
-                            )
-                        except Exception as db_err:
-                            logger.error(f"Failed to update db on failure: {db_err}")
+                if active_run.is_done and client_queue.empty():
+                    completed_normally = True
                     break
-
-                queue_get_task = asyncio.create_task(event_queue.get())
-                done, pending = await asyncio.wait(
-                    [queue_get_task, research_task],
-                    timeout=30,
-                    return_when=asyncio.FIRST_COMPLETED
-                )
-
-                if queue_get_task not in done:
-                    queue_get_task.cancel()
-
-                if not done:
-                    # Timeout reached (heartbeat)
-                    yield ": heartbeat\n\n"
-                    continue
-
-                if queue_get_task in done:
-                    event = queue_get_task.result()
+                try:
+                    event = await asyncio.wait_for(client_queue.get(), timeout=30.0)
                     event_name = event.get("event", "message")
                     event_data = json.dumps(event.get("data", {}))
                     yield f"event: {event_name}\ndata: {event_data}\n\n"
-
-                    if event_name == "complete":
-                        # Update run record to complete
-                        try:
-                            report_content = ""
-                            try:
-                                report_content = load_report(run_id)
-                            except Exception:
-                                pass
-                            await asyncio.to_thread(
-                                client.table("research_runs").update({
-                                    "status": "complete",
-                                    "progress": 100,
-                                    "report": report_content,
-                                    "completed_at": datetime.now(UTC).isoformat()
-                                }).eq("id", run_id).execute
-                            )
-                        except Exception as e:
-                            logger.error(f"Failed to update db on complete: {e}")
+                    if event_name in ("complete", "error"):
+                        completed_normally = True
                         break
-
+                except asyncio.TimeoutError:
+                    yield ": heartbeat\n\n"
         except asyncio.CancelledError:
-            logger.info("SSE client disconnected, research cancelled to prevent memory leak")
-            research_task.cancel()
-            # Update run record to failed/cancelled
-            try:
-                await asyncio.to_thread(
-                    client.table("research_runs").update({
-                        "status": "failed",
-                        "completed_at": datetime.now(UTC).isoformat()
-                    }).eq("id", run_id).execute
-                )
-            except Exception as db_err:
-                logger.error(f"Failed to update db on cancel: {db_err}")
-        except Exception as e:
-            logger.error(f"SSE generator error: {e}")
-            error_data = json.dumps({"error": str(e)})
-            yield f"event: error\ndata: {error_data}\n\n"
-            # Update run record to failed
-            try:
-                await asyncio.to_thread(
-                    client.table("research_runs").update({
-                        "status": "failed",
-                        "completed_at": datetime.now(UTC).isoformat()
-                    }).eq("id", run_id).execute
-                )
-            except Exception as db_err:
-                logger.error(f"Failed to update db on error: {db_err}")
+            logger.info(f"SSE client disconnected from run {run_id}")
+        finally:
+            active_run.listeners.discard(client_queue)
+            if not completed_normally and not active_run.listeners:
+                logger.info(f"No listeners left for run {run_id}, cancelling research task")
+                active_run.task.cancel()
+                try:
+                    await asyncio.to_thread(
+                        client.table("research_runs").update({
+                            "status": "failed",
+                            "completed_at": datetime.now(UTC).isoformat()
+                        }).eq("id", run_id).execute
+                    )
+                except Exception as db_err:
+                    logger.error(f"Failed to update db on cancel: {db_err}")
 
     return StreamingResponse(
         event_generator(),
@@ -605,6 +823,8 @@ async def generate_plan(request: ResearchRequest, user_data: dict = Depends(veri
     workspace_id = request.workspace_id
     if not workspace_id:
         raise HTTPException(status_code=400, detail="workspace_id is required")
+    from research_engine.config import workspace_id_var
+    workspace_id_var.set(workspace_id)
     user_id = user_data.get("sub")
     if not user_id:
         raise HTTPException(status_code=400, detail="Invalid user ID in token")
@@ -702,6 +922,8 @@ async def execute_approved_plan(approval: PlanApproval, user_data: dict = Depend
     workspace_id = approval.workspace_id
     if not workspace_id:
         raise HTTPException(status_code=400, detail="workspace_id is required")
+    from research_engine.config import workspace_id_var
+    workspace_id_var.set(workspace_id)
     user_id = user_data.get("sub")
     if not user_id:
         raise HTTPException(status_code=400, detail="Invalid user ID in token")
@@ -711,6 +933,75 @@ async def execute_approved_plan(approval: PlanApproval, user_data: dict = Depend
 
     run_id = approval.run_id or _generate_run_id()
     approval.run_id = run_id
+
+    # Check if this run is already actively running
+    existing_run = active_research_registry.get(run_id)
+    if existing_run:
+        logger.info(f"Reconnecting client to active plan execution {run_id}")
+        client_queue = asyncio.Queue()
+        for event in existing_run.history:
+            client_queue.put_nowait(event)
+        existing_run.listeners.add(client_queue)
+
+        async def event_generator():
+            completed_normally = False
+            try:
+                while True:
+                    if existing_run.is_done and client_queue.empty():
+                        completed_normally = True
+                        break
+                    try:
+                        event = await asyncio.wait_for(client_queue.get(), timeout=30.0)
+                        event_name = event.get("event", "message")
+                        event_data = json.dumps(event.get("data", {}))
+                        yield f"event: {event_name}\ndata: {event_data}\n\n"
+                        if event_name in ("complete", "error"):
+                            completed_normally = True
+                            break
+                    except asyncio.TimeoutError:
+                        yield ": heartbeat\n\n"
+            except asyncio.CancelledError:
+                logger.info(f"SSE client disconnected from active plan execution {run_id}")
+            finally:
+                existing_run.listeners.discard(client_queue)
+                if not completed_normally and not existing_run.listeners:
+                    logger.info(f"No listeners left for active plan execution {run_id}, cancelling research task")
+                    existing_run.task.cancel()
+                    try:
+                        await asyncio.to_thread(
+                            client.table("research_runs").update({
+                                "status": "failed",
+                                "completed_at": datetime.now(UTC).isoformat()
+                            }).eq("id", run_id).execute
+                        )
+                    except Exception as db_err:
+                        logger.error(f"Failed to update db on cancel: {db_err}")
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    elif not approval.query:
+        # Reconnect failed because task is not active in registry
+        async def event_generator():
+            error_data = json.dumps({
+                "error": "Research run is no longer active in memory. It may have completed, failed, or the server restarted. Please check the sidebar to view details."
+            })
+            yield f"event: error\ndata: {error_data}\n\n"
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     # Insert / upsert the run record
     run_record = {
@@ -747,94 +1038,44 @@ async def execute_approved_plan(approval: PlanApproval, user_data: dict = Depend
         orchestrator.run_with_plan(approval, event_queue=event_queue)
     )
 
+    active_run = active_research_registry.register(run_id, research_task, event_queue, client, is_plan=True)
+
+    client_queue = asyncio.Queue()
+    active_run.listeners.add(client_queue)
+
     async def event_generator():
-        """Yield SSE-formatted events from the approved plan execution."""
+        completed_normally = False
         try:
             while True:
-                # If research task is done and queue is empty, we are finished
-                if research_task.done() and event_queue.empty():
-                    exc = research_task.exception()
-                    if exc:
-                        error_data = json.dumps({
-                            "error": f"{type(exc).__name__}: {str(exc)}"
-                        })
-                        yield f"event: error\ndata: {error_data}\n\n"
-                        try:
-                            await asyncio.to_thread(
-                                client.table("research_runs").update({
-                                    "status": "failed",
-                                    "completed_at": datetime.now(UTC).isoformat()
-                                }).eq("id", run_id).execute
-                            )
-                        except Exception as db_err:
-                            logger.error(f"Failed to update db on failure: {db_err}")
+                if active_run.is_done and client_queue.empty():
+                    completed_normally = True
                     break
-
-                queue_get_task = asyncio.create_task(event_queue.get())
-                done, pending = await asyncio.wait(
-                    [queue_get_task, research_task],
-                    timeout=30,
-                    return_when=asyncio.FIRST_COMPLETED
-                )
-
-                if queue_get_task not in done:
-                    queue_get_task.cancel()
-
-                if not done:
-                    # Timeout reached (heartbeat)
-                    yield ": heartbeat\n\n"
-                    continue
-
-                if queue_get_task in done:
-                    event = queue_get_task.result()
+                try:
+                    event = await asyncio.wait_for(client_queue.get(), timeout=30.0)
                     event_name = event.get("event", "message")
                     event_data = json.dumps(event.get("data", {}))
                     yield f"event: {event_name}\ndata: {event_data}\n\n"
-
-                    if event_name == "complete":
-                        # Update run record to complete
-                        try:
-                            report_content = ""
-                            try:
-                                report_content = load_report(run_id)
-                            except Exception:
-                                pass
-                            await asyncio.to_thread(
-                                client.table("research_runs").update({
-                                    "status": "complete",
-                                    "progress": 100,
-                                    "report": report_content,
-                                    "completed_at": datetime.now(UTC).isoformat()
-                                }).eq("id", run_id).execute
-                            )
-                        except Exception as e:
-                            logger.error(f"Failed to update db on complete: {e}")
+                    if event_name in ("complete", "error"):
+                        completed_normally = True
                         break
+                except asyncio.TimeoutError:
+                    yield ": heartbeat\n\n"
         except asyncio.CancelledError:
-            logger.info("SSE client disconnected from plan execution, research cancelled to prevent memory leak")
-            research_task.cancel()
-            # Update run record to failed/cancelled
-            try:
-                await asyncio.to_thread(
-                    client.table("research_runs").update({
-                        "status": "failed",
-                        "completed_at": datetime.now(UTC).isoformat()
-                    }).eq("id", run_id).execute
-                )
-            except Exception as db_err:
-                logger.error(f"Failed to update db on cancel: {db_err}")
-        except Exception as e:
-            logger.error(f"SSE generator error: {e}")
-            # Update run record to failed
-            try:
-                await asyncio.to_thread(
-                    client.table("research_runs").update({
-                        "status": "failed",
-                        "completed_at": datetime.now(UTC).isoformat()
-                    }).eq("id", run_id).execute
-                )
-            except Exception as db_err:
-                logger.error(f"Failed to update db on error: {db_err}")
+            logger.info(f"SSE client disconnected from plan execution {run_id}")
+        finally:
+            active_run.listeners.discard(client_queue)
+            if not completed_normally and not active_run.listeners:
+                logger.info(f"No listeners left for plan execution {run_id}, cancelling research task")
+                active_run.task.cancel()
+                try:
+                    await asyncio.to_thread(
+                        client.table("research_runs").update({
+                            "status": "failed",
+                            "completed_at": datetime.now(UTC).isoformat()
+                        }).eq("id", run_id).execute
+                    )
+                except Exception as db_err:
+                    logger.error(f"Failed to update db on cancel: {db_err}")
 
     return StreamingResponse(
         event_generator(),
@@ -1879,7 +2120,7 @@ async def list_workspaces(user_data: dict = Depends(verify_supabase_jwt)):
     # Dev-bypass: return a synthetic local workspace so the UI is fully functional
     # without requiring Supabase workspace tables to be seeded.
     # We use a valid UUID to prevent PostgreSQL parsing errors.
-    if user_id == "dev-bypass-user":
+    if user_id == "22222222-2222-2222-2222-222222222222":
         return [{"id": "11111111-1111-1111-1111-111111111111", "name": "Dev Workspace", "created_at": "2024-01-01T00:00:00Z"}]
 
     client = get_supabase_client()
@@ -1912,7 +2153,7 @@ async def create_workspace(workspace: WorkspaceCreate, user_data: dict = Depends
         raise HTTPException(status_code=400, detail="Workspace name cannot be empty")
 
     # Dev-bypass: return a synthetic workspace, inserting it to satisfy foreign key constraints.
-    if user_id == "dev-bypass-user":
+    if user_id == "22222222-2222-2222-2222-222222222222":
         import uuid
         ws_id = str(uuid.uuid4())
         try:
@@ -2025,11 +2266,15 @@ async def search_notes(
             logger.debug(f"FTS search failed, falling back to ILIKE: {fts_err}")
 
         # Fallback to ILIKE
+        q_clean = re.sub(r'[^a-zA-Z0-9\s_\-\.]', '', q)
+        if not q_clean.strip():
+            return NoteSearchResponse(notes=[], query=q, total=0)
+
         response = await asyncio.to_thread(
             client.table("notes")
             .select("id, title, workspace_id, created_at, updated_at")
             .eq("workspace_id", workspace_id)
-            .or_(f"title.ilike.%{q}%,content.ilike.%{q}%")
+            .or_(f"title.ilike.%{q_clean}%,content.ilike.%{q_clean}%")
             .order("updated_at", desc=True)
             .execute
         )
@@ -2135,6 +2380,15 @@ async def create_note(
             backlink_count=0,
         )
     except Exception as e:
+        err_msg = str(e).lower()
+        if "new row violates" in err_msg or "rls" in err_msg or "violates" in err_msg or "permission denied" in err_msg:
+            logger.error(f"Failed to create note (RLS/key issue): {e}")
+            raise HTTPException(
+                status_code=500,
+                detail="Supabase insert failed. Ensure SUPABASE_KEY is the service_role key (not anon). "
+                       "Find it at: Supabase Dashboard → Settings → API → service_role (secret). "
+                       f"Original error: {e}"
+            )
         logger.error(f"Failed to create note: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -2195,6 +2449,14 @@ async def update_note(
     except HTTPException:
         raise
     except Exception as e:
+        err_msg = str(e).lower()
+        if "rls" in err_msg or "violates" in err_msg or "permission denied" in err_msg:
+            logger.error(f"Failed to update note (RLS/key issue): {e}")
+            raise HTTPException(
+                status_code=500,
+                detail="Supabase update failed. Ensure SUPABASE_KEY is the service_role key. "
+                       f"Original error: {e}"
+            )
         logger.error(f"Failed to update note: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -2321,12 +2583,34 @@ async def upload_document(
     await verify_workspace_membership(client, workspace_id, user_id)
 
     try:
+        ALLOWED_MIME_TYPES = {
+            "application/pdf",
+            "text/plain",
+            "text/markdown",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }
+        ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md", ".docx"}
+
+        file_ext = Path(file.filename).suffix.lower()
+        if not (file.content_type in ALLOWED_MIME_TYPES or file_ext in ALLOWED_EXTENSIONS):
+            raise HTTPException(
+                status_code=415,
+                detail="Unsupported file type. Allowed types: PDF, TXT, MD, DOCX"
+            )
+
         kb_dir = get_workspace_kb_dir(workspace_id)
         raw_dir = kb_dir / "raw"
         raw_dir.mkdir(parents=True, exist_ok=True)
 
         file_path = raw_dir / file.filename
         content = await file.read()
+
+        if len(content) > 50 * 1024 * 1024:
+            raise HTTPException(
+                status_code=413,
+                detail="File too large (max 50MB)"
+            )
+
         file_path.write_bytes(content)
 
         # Detect if document is "long" (>100KB threshold)
@@ -2850,6 +3134,15 @@ async def seed_starter_notes(
             "notes": [{"id": n["id"], "title": n["title"]} for n in created_notes],
         }
     except Exception as e:
+        err_msg = str(e).lower()
+        if "rls" in err_msg or "violates" in err_msg or "permission denied" in err_msg:
+            logger.error(f"Failed to seed starter notes (RLS/key issue): {e}")
+            raise HTTPException(
+                status_code=500,
+                detail="Supabase insert failed. Ensure SUPABASE_KEY is the service_role key (not anon). "
+                       "Find it at: Supabase Dashboard → Settings → API → service_role (secret). "
+                       f"Original error: {e}"
+            )
         logger.error(f"Failed to seed starter notes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -2961,6 +3254,8 @@ async def comprehensive_research(
     client = get_supabase_client()
     user_id = user_data.get("sub", user_data.get("id"))
     workspace_id = request.workspace_id or "default"
+    from research_engine.config import workspace_id_var
+    workspace_id_var.set(workspace_id)
     await verify_workspace_membership(client, workspace_id, user_id)
 
     try:

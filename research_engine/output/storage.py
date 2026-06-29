@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -25,6 +26,13 @@ from research_engine.models import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_OUTPUT_DIR = Path("outputs")
+
+
+def validate_run_id(run_id: str) -> None:
+    """Validate that the run_id is a safe UUID or alphanumeric format to prevent path traversal."""
+    if not isinstance(run_id, str) or not re.match(r'^[a-zA-Z0-9_\-]+$', run_id):
+        raise ValueError(f"Invalid or unsafe run_id: {run_id}")
+
 
 
 async def save_run(
@@ -43,6 +51,7 @@ async def save_run(
 
     Returns the run directory path.
     """
+    validate_run_id(result.run_id)
     import asyncio
     import aiofiles
 
@@ -85,6 +94,7 @@ async def save_run(
 
 def load_run(run_id: str, output_dir: Path | str = DEFAULT_OUTPUT_DIR) -> ResearchResult:
     """Load a research result from disk."""
+    validate_run_id(run_id)
     run_dir = Path(output_dir) / run_id
     trace_path = run_dir / "trace.json"
 
@@ -97,6 +107,7 @@ def load_run(run_id: str, output_dir: Path | str = DEFAULT_OUTPUT_DIR) -> Resear
 
 def load_mindmap(run_id: str, output_dir: Path | str = DEFAULT_OUTPUT_DIR) -> MindmapGraph:
     """Load a mindmap graph from disk."""
+    validate_run_id(run_id)
     run_dir = Path(output_dir) / run_id
     mindmap_path = run_dir / "mindmap.json"
 
@@ -113,6 +124,7 @@ def save_mindmap(
     output_dir: Path | str = DEFAULT_OUTPUT_DIR,
 ) -> None:
     """Save an updated mindmap graph to disk."""
+    validate_run_id(run_id)
     run_dir = Path(output_dir) / run_id
     mindmap_path = run_dir / "mindmap.json"
     mindmap_path.write_text(mindmap.model_dump_json(indent=2), encoding="utf-8")
@@ -126,6 +138,7 @@ async def save_knowledge_graph(
     output_dir: Path | str = DEFAULT_OUTPUT_DIR,
 ) -> None:
     """Save a KnowledgeGraph to disk as knowledge_graph.json and database tables."""
+    validate_run_id(run_id)
     import aiofiles
     import asyncio
     run_dir = Path(output_dir) / run_id
@@ -187,6 +200,7 @@ def load_knowledge_graph(
     output_dir: Path | str = DEFAULT_OUTPUT_DIR,
 ) -> KnowledgeGraph:
     """Load a KnowledgeGraph from database or disk."""
+    validate_run_id(run_id)
     # Try database first
     try:
         from research_engine.db.supabase.client import get_supabase_client
@@ -225,6 +239,7 @@ def knowledge_graph_available(
     output_dir: Path | str = DEFAULT_OUTPUT_DIR,
 ) -> bool:
     """Return True if a knowledge_graph.json exists for this run."""
+    validate_run_id(run_id)
     return (Path(output_dir) / run_id / "knowledge_graph.json").exists()
 
 
@@ -233,12 +248,14 @@ def graph_html_available(
     output_dir: Path | str = DEFAULT_OUTPUT_DIR,
 ) -> bool:
     """Return True if a graph.html exists for this run."""
+    validate_run_id(run_id)
     return (Path(output_dir) / run_id / "graph.html").exists()
 
 
 
 def load_report(run_id: str, output_dir: Path | str = DEFAULT_OUTPUT_DIR) -> str:
     """Load a report Markdown from disk."""
+    validate_run_id(run_id)
     run_dir = Path(output_dir) / run_id
     report_path = run_dir / "report.md"
 

@@ -1,7 +1,7 @@
 # DeepResearchAgent — Database Schema Reference
 
-> **Last Updated:** 2026-06-26
-> **Source:** `supabase/migrations/combined_migration.sql`
+> **Last Updated:** 2026-06-27
+> **Source:** `research_engine/db/supabase/migrations/`
 > **Database:** PostgreSQL 15 (Supabase)
 
 ---
@@ -63,36 +63,33 @@ CREATE TABLE workspace_members (
 
 ### `research_runs`
 
-One record per research run. Stores the full report, mindmap data, and KG.
+One record per research run. Stores the query, run settings, status, final report, G6 mindmap, and KG.
 
 ```sql
 CREATE TABLE research_runs (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     workspace_id    UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    user_id         UUID NOT NULL,
+    user_id         UUID REFERENCES auth.users(id) ON DELETE SET NULL,
     query           TEXT NOT NULL,
     status          TEXT DEFAULT 'pending',       -- see ResearchState enum
     report          TEXT,                         -- Markdown report text
-    citations       JSONB DEFAULT '[]',           -- array of citation objects
+    citations       JSONB DEFAULT '[]'::jsonb,    -- array of citation objects
+    sources         JSONB DEFAULT '[]'::jsonb,    -- array of search/scrape sources
     model           TEXT,                         -- LLM model used
-    depth           INTEGER DEFAULT 5,            -- research depth (1–5)
-    cycle_count     INTEGER DEFAULT 0,
+    depth           INTEGER DEFAULT 1,            -- research depth (1–5)
+    cycle_count     INTEGER DEFAULT 0,            -- current cycle count
+    total_cycles    INTEGER DEFAULT 0,            -- total estimated cycles
+    started_at      TIMESTAMP WITH TIME ZONE,     -- timestamp when run started
+    completed_at    TIMESTAMP WITH TIME ZONE,     -- timestamp when run finished
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW(),
     search_provider TEXT,
+    mode            TEXT DEFAULT 'web',           -- run mode
     plan            JSONB,                        -- research plan (decomposed queries)
     mindmap         JSONB,                        -- G6 mindmap data
     knowledge_graph JSONB,                        -- full KG JSON
-    metadata        JSONB DEFAULT '{}',
-    created_at      TIMESTAMPTZ DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ DEFAULT NOW(),
-    completed_at    TIMESTAMPTZ
+    metadata        JSONB DEFAULT '{}'
 );
-```
-
-**Key indexes:**
-```sql
-CREATE INDEX idx_research_runs_workspace ON research_runs(workspace_id);
-CREATE INDEX idx_research_runs_status ON research_runs(status);
-CREATE INDEX idx_research_runs_created ON research_runs(created_at DESC);
 ```
 
 ---
@@ -151,27 +148,20 @@ Personal notes with full-text search and wiki-link support.
 CREATE TABLE notes (
     id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     workspace_id  UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    user_id       UUID NOT NULL,
-    title         TEXT NOT NULL DEFAULT '',
-    content       TEXT DEFAULT '',
-    tags          JSONB DEFAULT '[]',             -- string array
-    is_pinned     BOOLEAN DEFAULT FALSE,
-    search_vector tsvector GENERATED ALWAYS AS (
-        to_tsvector('english',
-            coalesce(title, '') || ' ' || coalesce(content, ''))
-    ) STORED,
+    title         TEXT NOT NULL,
+    content       TEXT NOT NULL DEFAULT '',
+    tags          TEXT[] DEFAULT '{}',
+    search_vector TSVECTOR,                       -- auto-generated for search
     created_at    TIMESTAMPTZ DEFAULT NOW(),
     updated_at    TIMESTAMPTZ DEFAULT NOW()
 );
 ```
 
-> `search_vector` is automatically kept in sync via `GENERATED ALWAYS AS` — no trigger needed.
-
 ---
 
 ### `documents`
 
-OpenKB document metadata. Actual document content lives on the local filesystem at `openkb/{workspace_id}/`.
+Registry of uploaded files for the OpenKB ingestion system.
 
 ```sql
 CREATE TABLE documents (
@@ -179,14 +169,13 @@ CREATE TABLE documents (
     workspace_id  UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     user_id       UUID NOT NULL,
     filename      TEXT NOT NULL,
-    original_name TEXT NOT NULL,
-    file_size     BIGINT,
-    mime_type     TEXT,
-    status        TEXT DEFAULT 'processing',      -- processing|ready|error
-    chunk_count   INTEGER DEFAULT 0,
-    metadata      JSONB DEFAULT '{}',
-    created_at    TIMESTAMPTZ DEFAULT NOW(),
-    updated_at    TIMESTAMPTZ DEFAULT NOW()
+    file_path     TEXT NOT NULL,
+    file_size     INTEGER NOT NULL,
+    mime_type     TEXT NOT NULL,
+    status        TEXT DEFAULT 'pending',          -- 'pending' | 'processing' | 'indexed' | 'failed'
+    page_count    INTEGER,
+    indexed_at    TIMESTAMPTZ,
+    created_at    TIMESTAMPTZ DEFAULT NOW()
 );
 ```
 
@@ -194,7 +183,7 @@ CREATE TABLE documents (
 
 ### `document_tags`
 
-Many-to-many tagging for documents.
+Tags assigned to individual OpenKB documents.
 
 ```sql
 CREATE TABLE document_tags (
@@ -208,20 +197,44 @@ CREATE TABLE document_tags (
 
 ### `citation_verifications`
 
-Citation cross-verification results linked to a research run.
+Persistent citation cross-verification results linked to research runs and databases.
 
 ```sql
 CREATE TABLE citation_verifications (
-    id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    run_id        UUID NOT NULL REFERENCES research_runs(id) ON DELETE CASCADE,
-    workspace_id  UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-    url           TEXT NOT NULL,
-    claim         TEXT,
-    is_verified   BOOLEAN,
-    confidence    FLOAT,
-    verification_source TEXT,
-    metadata      JSONB DEFAULT '{}',
-    created_at    TIMESTAMPTZ DEFAULT NOW()
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id        UUID REFERENCES research_runs(id) ON DELETE CASCADE NOT NULL,
+    workspace_id  UUID REFERENCES workspaces(id) ON DELETE CASCADE NOT NULL,
+    citation_text TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'failed',  -- verified | unverified | failed
+    found         BOOLEAN NOT NULL DEFAULT FALSE,
+    title         TEXT,
+    authors       TEXT[] DEFAULT '{}',
+    year          INT,
+    doi           TEXT,
+    url           TEXT,
+    confidence    FLOAT DEFAULT 0.0,
+    sources       INT DEFAULT 0,
+    databases     TEXT[] DEFAULT '{}',
+    created_at    TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at    TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+```
+
+---
+
+### `checkpoints`
+
+Stores snapshot checkpoints of research runs to enable resuming from interruptions.
+
+```sql
+CREATE TABLE checkpoints (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id        UUID REFERENCES research_runs(id) ON DELETE CASCADE NOT NULL,
+    workspace_id  UUID REFERENCES workspaces(id) ON DELETE CASCADE NOT NULL,
+    phase         TEXT NOT NULL,
+    state_json    JSONB NOT NULL,
+    size_bytes    INT DEFAULT 0,
+    created_at    TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 ```
 
@@ -234,6 +247,8 @@ CREATE TABLE citation_verifications (
 CREATE INDEX idx_research_runs_workspace ON research_runs(workspace_id);
 CREATE INDEX idx_research_runs_status    ON research_runs(status);
 CREATE INDEX idx_research_runs_created   ON research_runs(created_at DESC);
+CREATE INDEX idx_research_runs_user_id   ON research_runs(user_id);
+CREATE INDEX idx_research_runs_started_at ON research_runs(started_at);
 
 -- graph_nodes
 CREATE INDEX idx_graph_nodes_run         ON graph_nodes(run_id);
@@ -257,7 +272,14 @@ CREATE INDEX idx_documents_workspace     ON documents(workspace_id);
 CREATE INDEX idx_documents_status        ON documents(status);
 
 -- citation_verifications
-CREATE INDEX idx_citations_run           ON citation_verifications(run_id);
+CREATE INDEX idx_citation_verifications_run_id ON citation_verifications(run_id);
+CREATE INDEX idx_citation_verifications_workspace_id ON citation_verifications(workspace_id);
+CREATE INDEX idx_citation_verifications_doi ON citation_verifications(doi);
+
+-- checkpoints
+CREATE INDEX idx_checkpoints_run_id      ON checkpoints(run_id);
+CREATE INDEX idx_checkpoints_workspace_id ON checkpoints(workspace_id);
+CREATE INDEX idx_checkpoints_created_at  ON checkpoints(created_at);
 ```
 
 ---
@@ -393,7 +415,7 @@ result = await asyncio.to_thread(
 
 ### `updated_at` Auto-Update
 
-Applied to `workspaces`, `research_runs`, `notes`, `documents`:
+Applied to `workspaces`, `research_runs`, `notes`, `documents`, and `citation_verifications`:
 
 ```sql
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -414,24 +436,25 @@ CREATE TRIGGER update_<table>_updated_at
 
 ## 7. Migration History
 
-| Migration File | Tables Added | Description |
-|----------------|-------------|-------------|
-| `combined_migration.sql` (part 1) | `workspaces`, `workspace_members`, `research_runs`, `graph_nodes`, `graph_edges` | Initial schema + pgvector + RLS |
-| `combined_migration.sql` (part 2) | `notes`, `documents`, `document_tags` | Notes and Documents module support |
-| `combined_migration.sql` (part 3) | `citation_verifications` | Citation verification system |
+| Migration File | Tables / Columns Added | Description |
+|----------------|------------------------|-------------|
+| `20260618000000_init_schema.sql` | `workspaces`, `workspace_members`, `research_runs`, `graph_nodes`, `graph_edges` | Initial base schema + pgvector config + RLS |
+| `20260618000001_add_notes_and_documents.sql` | `notes`, `documents`, `document_tags` | Notes module (FTS index) and OpenKB documents support |
+| `20260623000000_add_citation_verifications.sql` | `citation_verifications` | Table schema and RLS for citation cross-verification results |
+| `20260623000001_add_checkpoints.sql` | `checkpoints` | Persistent research checkpoints for resume operations |
+| `20260623000002_fix_research_runs_schema.sql` | `research_runs` columns (`user_id`, `started_at`, `mode`, `sources`, `total_cycles`) | Adds missing columns expected by API and triggers to auto-stamp start times |
 
 ### Applying Migrations
 
-1. Open the Supabase SQL Editor for your project
-2. Copy the contents of `supabase/migrations/combined_migration.sql`
-3. Run the entire migration in one transaction
-4. Verify with:
+1. Ensure the Supabase CLI or SQL Editor is connected.
+2. Run each migration SQL file sequentially.
+3. Verify table existence:
 ```sql
 SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;
--- Expected: citation_verifications, document_tags, documents, graph_edges,
---           graph_nodes, notes, research_runs, workspace_members, workspaces
+-- Expected: checkpoints, citation_verifications, document_tags, documents,
+--           graph_edges, graph_nodes, notes, research_runs, workspace_members, workspaces
 ```
 
 ---
 
-*Generated: 2026-06-26 | Source: `supabase/migrations/combined_migration.sql`*
+*Generated: 2026-06-27 | Source: `research_engine/db/supabase/migrations/`*

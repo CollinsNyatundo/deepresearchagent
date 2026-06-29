@@ -1,6 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
-import { toast } from 'sonner'
-import { z } from 'zod'
+import { useEffect } from 'react'
 import { Plus, FlaskConical, ListChecks, Download, Quote, ChevronLeft, ChevronRight, Settings2, Database, FileText, Activity, ShieldCheck, Map, Network } from 'lucide-react'
 
 import { RunList } from '../../components/runs/RunList'
@@ -13,8 +11,8 @@ import { ExportPanel } from '../../components/views/ExportPanel'
 import { MindmapView } from '../../components/views/MindmapView'
 import { KnowledgeGraphView } from '../../components/knowledge-graph/KnowledgeGraphView'
 import { api } from '../../api/client'
-import type { ResearchEvent, PlanPreview, TelemetryResponse } from '../../types/api'
 import { useAuth } from '../../lib/authContext'
+import { useResearch } from '../../lib/researchContext'
 import { WorkspaceSelector } from '../../components/Auth/WorkspaceSelector'
 import Layout from '../../components/layout/Layout'
 import { cn } from '../../lib/utils'
@@ -26,150 +24,53 @@ const PRESETS = [
   { label: '📘 TS Decorators', query: 'Explain TypeScript 5.0 decorators and provide comparison to stage 2 decorators', provider: 'openrouter', model: 'qwen/qwen3-235b-a22b:free', depth: 1, mode: 'web' },
 ]
 
-const researchSchema = z.object({
-  query: z.string().min(3, 'Query must be at least 3 characters'),
-  model: z.string().min(1, 'Model is required'),
-  depth: z.number().min(1).max(5),
-  mode: z.enum(['web', 'github']),
-  provider: z.enum(['openrouter', 'groq']),
-})
-
-
-
-type AppState = 'idle' | 'plan_loading' | 'plan_review' | 'streaming' | 'results'
-
 export default function ResearchModule() {
   const { user, signOut } = useAuth()
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null)
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<string>('report')
-  const [refreshKey, setRefreshKey] = useState(0)
-
-  const [globalView, setGlobalView] = useState<'research' | 'code-arch'>('research')
-  const [appState, setAppState] = useState<AppState>('idle')
-  const [resultsSidebarExpanded, setResultsSidebarExpanded] = useState(true)
-  const [advancedOpen, setAdvancedOpen] = useState(false)
-
-  const [query, setQuery] = useState('')
-  const [model, setModel] = useState('nvidia/nemotron-3-super-120b-a12b:free')
-  const [provider, setProvider] = useState<'openrouter' | 'groq'>('openrouter')
-  const [depth, setDepth] = useState(5)
-  const [mode, setMode] = useState<'web' | 'github'>('web')
-  const [isSubmitting, setIsSubmitting] = useState(false)
-
-  const [planPreview, setPlanPreview] = useState<PlanPreview | null>(null)
-  const [planQuery, setPlanQuery] = useState('')
-
-  const [streamEvents, setStreamEvents] = useState<ResearchEvent[]>([])
-  const [isStreaming, setIsStreaming] = useState(false)
-  const abortRef = useRef<AbortController | null>(null)
-
-  const [telemetry, setTelemetry] = useState<TelemetryResponse | null>(null)
-
-  const handleProviderChange = (val: 'openrouter' | 'groq') => {
-    setProvider(val)
-    if (val === 'groq') {
-      setModel('llama-3.3-70b-versatile')
-    } else {
-      setModel('nvidia/nemotron-3-super-120b-a12b:free')
-    }
-  }
-
-  const fetchTelemetry = useCallback(async () => {
-    try { setTelemetry(await api.getTelemetry()) }
-    catch (err) { console.error('Telemetry failed:', err) }
-  }, [])
+  const {
+    selectedWorkspaceId,
+    setSelectedWorkspaceId,
+    selectedRunId,
+    setSelectedRunId,
+    activeTab,
+    setActiveTab,
+    refreshKey,
+    globalView,
+    setGlobalView,
+    appState,
+    setAppState,
+    resultsSidebarExpanded,
+    setResultsSidebarExpanded,
+    advancedOpen,
+    setAdvancedOpen,
+    query,
+    setQuery,
+    model,
+    setModel,
+    provider,
+    setProvider,
+    depth,
+    setDepth,
+    mode,
+    setMode,
+    isSubmitting,
+    planPreview,
+    planQuery,
+    streamEvents,
+    isStreaming,
+    telemetry,
+    fetchTelemetry,
+    handleProviderChange,
+    handleGeneratePlan,
+    handleApproveAndStart,
+    handleQuickStart,
+    resetToIdle,
+    reconnectToRun,
+  } = useResearch()
 
   useEffect(() => {
     if (appState === 'idle' && !selectedRunId) fetchTelemetry()
   }, [appState, selectedRunId, fetchTelemetry])
 
-  const handleGeneratePlan = useCallback(async () => {
-    const validation = researchSchema.safeParse({ query, model, depth, mode, provider })
-    if (!validation.success) {
-      toast.error(validation.error.issues[0].message)
-      return
-    }
-    if (!selectedWorkspaceId) { toast.error('Please select or create a workspace first'); return }
-    setIsSubmitting(true)
-    setAppState('plan_loading')
-    try {
-      const preview = await api.generatePlan({ query: query.trim(), model, depth, mode, provider, workspace_id: selectedWorkspaceId })
-      setPlanPreview(preview)
-      setPlanQuery(query.trim())
-      setAppState('plan_review')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Plan generation failed')
-      setAppState('idle')
-    } finally { setIsSubmitting(false) }
-  }, [query, model, depth, mode, provider, selectedWorkspaceId])
-
-  const handleApproveAndStart = useCallback((steps: string[], subQueries: string[], exportFormats: string[]) => {
-    if (!selectedWorkspaceId) { toast.error('Please select or create a workspace first'); return }
-    setStreamEvents([])
-    setIsStreaming(true)
-    setAppState('streaming')
-    setActiveTab('progress')
-
-    const controller = api.streamApprovedPlan(
-      { query: planQuery, plan: { steps }, sub_queries: subQueries, model, depth, mode, provider, export_formats: exportFormats, workspace_id: selectedWorkspaceId },
-      (event) => setStreamEvents((prev) => [...prev, event]),
-      (data) => {
-        setIsStreaming(false)
-        if (data.run_id) {
-          setSelectedRunId(data.run_id)
-          setRefreshKey(k => k + 1)
-          setActiveTab('report')
-          setAppState('results')
-        }
-      },
-      (errorMsg) => { setIsStreaming(false); toast.error(errorMsg) }
-    )
-    abortRef.current = controller
-  }, [planQuery, model, depth, mode, provider, selectedWorkspaceId])
-
-  const handleQuickStart = useCallback(async () => {
-    const validation = researchSchema.safeParse({ query, model, depth, mode, provider })
-    if (!validation.success) {
-      toast.error(validation.error.issues[0].message)
-      return
-    }
-    if (!selectedWorkspaceId) { toast.error('Please select or create a workspace first'); return }
-    setIsSubmitting(true)
-    setStreamEvents([])
-    setIsStreaming(true)
-    setAppState('streaming')
-    setActiveTab('progress')
-
-    const controller = api.streamResearch(
-      { query: query.trim(), model, depth, mode, provider, workspace_id: selectedWorkspaceId },
-      (event) => setStreamEvents((prev) => [...prev, event]),
-      (data) => {
-        setIsStreaming(false)
-        setIsSubmitting(false)
-        if (data.run_id) {
-          setSelectedRunId(data.run_id)
-          setRefreshKey(k => k + 1)
-          setActiveTab('report')
-          setAppState('results')
-        }
-      },
-      (errorMsg) => { setIsStreaming(false); setIsSubmitting(false); toast.error(errorMsg) }
-    )
-    abortRef.current = controller
-    setQuery('')
-  }, [query, model, depth, mode, provider, selectedWorkspaceId])
-
-  const resetToIdle = useCallback(() => {
-    setPlanPreview(null)
-    setPlanQuery('')
-    setStreamEvents([])
-    setIsStreaming(false)
-    setAppState('idle')
-    setSelectedRunId(null)
-    setActiveTab('report')
-    if (abortRef.current) { abortRef.current.abort(); abortRef.current = null }
-  }, [])
 
   // ─── Sidebar Content ───────────────────────────────────────────
   const sidebarContent = (
@@ -217,11 +118,20 @@ export default function ResearchModule() {
                 key={refreshKey}
                 selectedRunId={selectedRunId}
                 selectedWorkspaceId={selectedWorkspaceId}
-                onSelectRun={(id) => {
-                  resetToIdle()
-                  setSelectedRunId(id)
-                  setActiveTab('report')
-                  setAppState('results')
+                onSelectRun={async (id) => {
+                  try {
+                    const details = await api.getRunDetails(id)
+                    if (details.status !== 'complete' && details.status !== 'failed') {
+                      reconnectToRun(id)
+                    } else {
+                      resetToIdle()
+                      setSelectedRunId(id)
+                      setActiveTab('report')
+                      setAppState('results')
+                    }
+                  } catch (err) {
+                    reconnectToRun(id)
+                  }
                 }}
               />
             </div>

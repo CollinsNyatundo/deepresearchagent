@@ -1,6 +1,6 @@
 # DeepResearchAgent — System Architecture
 
-> **Last Updated:** 2026-06-26
+> **Last Updated:** 2026-06-27
 > **Version:** Production
 > **Scope:** Full system — backend, frontend, database, and infrastructure
 
@@ -19,10 +19,13 @@
 9. [Scraping Layer](#9-scraping-layer)
 10. [Streaming Architecture (SSE)](#10-streaming-architecture-sse)
 11. [Knowledge Graph Subsystem](#11-knowledge-graph-subsystem)
-12. [Frontend Architecture](#12-frontend-architecture)
-13. [Configuration Reference](#13-configuration-reference)
-14. [Deployment Architecture](#14-deployment-architecture)
-15. [Key Design Decisions](#15-key-design-decisions)
+12. [Research Formats Subsystem](#12-research-formats-subsystem)
+13. [Skills Loader & Execution Engine](#13-skills-loader--execution-engine)
+14. [Database Operations Layer (SupabaseOps)](#14-database-operations-layer-supabaseops)
+15. [Frontend Architecture](#15-frontend-architecture)
+16. [Configuration Reference](#16-configuration-reference)
+17. [Deployment](#17-deployment)
+18. [Key Design Decisions](#18-key-design-decisions)
 
 ---
 
@@ -82,13 +85,13 @@
 │  └──────────┘  └──────────┘  └──────────┘  └────────────────┘  │
 └──────────────────────────────┬──────────────────────────────────┘
                                │
-          ┌────────────────────┼────────────────────┐
-          │                    │                     │
-┌─────────▼────────┐  ┌────────▼───────┐  ┌────────▼────────────┐
-│ Supabase          │  │ OpenRouter API │  │ Local Filesystem     │
-│ PostgreSQL        │  │ (LLM Gateway)  │  │ openkb/{ws_id}/      │
-│ pgvector · RLS    │  │                │  │ outputs/ graphify-out/│
-└──────────────────┘  └────────────────┘  └─────────────────────┘
+           ┌────────────────────┼────────────────────┐
+           │                    │                     │
+ ┌─────────▼────────┐  ┌────────▼───────┐  ┌────────▼────────────┐
+ │ Supabase         │  │ OpenRouter API │  │ Local Filesystem     │
+ │ PostgreSQL       │  │ (LLM Gateway)  │  │ openkb/{ws_id}/      │
+ │ pgvector · RLS   │  │                │  │ outputs/ graphify-out/│
+ └──────────────────┘  └────────────────┘  └─────────────────────┘
 ```
 
 ### Webhook Worker (Separate Process)
@@ -103,7 +106,7 @@ A standalone FastAPI app (`worker.py`) handles HMAC-verified webhook triggers fo
 
 ```
 research_engine/
-├── api.py                  # FastAPI routes — ALL endpoints (~2700 lines)
+├── api.py                  # FastAPI routes — ALL endpoints
 ├── auth.py                 # JWT verification + workspace membership
 ├── cli.py                  # CLI entry point
 ├── config.py               # Configuration loader (TOML + env vars)
@@ -112,13 +115,28 @@ research_engine/
 ├── setup_shims.py          # Compatibility shims
 │
 ├── agent/
-│   ├── orchestrator.py     # Main research loop (45KB, CC hotspot)
+│   ├── orchestrator.py     # Main research loop
 │   ├── planner.py          # Research plan generation
 │   ├── searcher.py         # Search + scrape coordination
 │   ├── router.py           # Intent classification router
 │   ├── crossover.py        # Cross-domain connection detection
-│   ├── retry.py            # Protocol-H reflective retry
-│   └── context.py          # ResearchContext (unit-of-work)
+│   ├── retry.py            # Protocol-H retry
+│   └── context.py          # ResearchContext
+│
+├── formats/                # Pluggable Research Formats Engine
+│   ├── __init__.py         # Formats package interface
+│   ├── registry.py         # Format registration and discovery
+│   └── pipelines.py        # Specialized report synthesis pipelines
+│
+├── skills/                 # Dynamic Skill Execution Engine
+│   ├── __init__.py         # Skills package interface
+│   ├── registry.py         # Skill execution and built-in registration
+│   └── external_loader.py  # Loads skills from external plugins
+│
+├── db/supabase/
+│   ├── client.py           # Sync client (wrapped in asyncio.to_thread)
+│   ├── ops.py              # SupabaseOps DB layer (async wrapper)
+│   └── migrations/         # SQL migrations
 │
 ├── llm/
 │   ├── provider.py         # LLMProvider (OpenRouter gateway)
@@ -143,10 +161,6 @@ research_engine/
 │   ├── formatter.py        # Report formatting
 │   ├── mindmap.py          # G6 mindmap data generation
 │   └── storage.py          # File output storage
-│
-├── db/supabase/
-│   ├── client.py           # Sync client (wrapped in asyncio.to_thread)
-│   └── migrations/         # SQL migrations (combined_migration.sql)
 │
 ├── citations/              # Citation extraction and verification
 ├── quality/                # Report quality assessment
@@ -217,7 +231,7 @@ frontend/src/
          reflect_on_plan() → LLM (periodic)
          check_progress() → LLM (periodic)
          ← SSE: cycle_complete
-     → generate_final_report() → LLM
+     → Format Pipeline Synthesis (based on selected format e.g. Academic, Business, Product)
      → build_mindmap() → LLM
      → build_knowledge_graph() → Graphify / LLM fallback
      → save to Supabase + filesystem
@@ -260,13 +274,14 @@ Export → GET /documents/wiki/download → Obsidian ZIP
 |-------|-----------|---------|
 | `workspaces` | 1 | Workspace registry |
 | `workspace_members` | 1 | User ↔ Workspace link |
-| `research_runs` | 1 | Research run metadata + report |
+| `research_runs` | 1 & 5 | Research run metadata + report + checkpoints |
 | `graph_nodes` | 1 | KG nodes (pgvector 1536-dim) |
 | `graph_edges` | 1 | KG edges between nodes |
 | `notes` | 2 | Personal notes (tsvector FTS) |
 | `documents` | 2 | OpenKB document metadata |
 | `document_tags` | 2 | Many-to-many tagging |
-| `citation_verifications` | 3 | Citation cross-verification results |
+| `citation_verifications` | 3 | Persistent citation cross-verification results |
+| `checkpoints` | 4 | Research checkpoint snapshots for recovery/resume |
 
 ### 5.2 Entity Relationships
 
@@ -276,7 +291,8 @@ workspaces ──< workspace_members >── auth.users
     ├──< research_runs
     │         ├──< graph_nodes (embedding: vector(1536))
     │         ├──< graph_edges
-    │         └──< citation_verifications
+    │         ├──< citation_verifications
+    │         └──< checkpoints
     │
     ├──< notes (tsvector search_vector, tags JSONB)
     └──< documents
@@ -285,7 +301,7 @@ workspaces ──< workspace_members >── auth.users
 
 ### 5.3 Row-Level Security
 
-**All 9 tables** have RLS enabled. Pattern applied universally:
+**All 10 tables** have RLS enabled. Pattern applied universally:
 
 ```sql
 USING (
@@ -330,18 +346,20 @@ CREATE INDEX idx_notes_search ON notes USING GIN(search_vector);
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/research/comprehensive` | Start run (async, returns `run_id`) |
+| `POST` | `/research/comprehensive` | Start run (async, returns `run_id`, accepts `format` query param) |
 | `POST` | `/research/stream` | SSE stream (`{run_id}` body) |
 | `POST` | `/research/plan` | Generate plan preview |
 | `POST` | `/research/approve` | Approve plan & start execution |
 | `GET`  | `/runs` | List workspace runs |
+| `GET`  | `/runs/{run_id}` | Retrieve run details |
 | `GET`  | `/runs/{run_id}/report` | Get final report |
 | `GET`  | `/runs/{run_id}/mindmap` | Get G6 mindmap data |
-| `GET`  | `/runs/{run_id}/export/{format}` | Export report |
+| `GET`  | `/runs/{run_id}/export/{format}` | Export report (JSON/MD/PDF/etc.) |
 | `POST` | `/runs/{run_id}/mindmap/expand` | Drill into mindmap node |
 | `GET`  | `/runs/{run_id}/knowledge-graph` | Get full KG |
 | `POST` | `/runs/{run_id}/knowledge-graph/query` | BFS/DFS KG query |
 | `POST` | `/runs/{run_id}/resynthesize` | Re-synthesize without re-search |
+| `POST` | `/runs/{run_id}/resume` | Resume run from a saved checkpoint |
 | `DELETE` | `/runs/{run_id}` | Delete run |
 | `GET`  | `/models` | List available LLM models |
 | `GET`  | `/telemetry` | Cache + circuit breaker stats |
@@ -462,7 +480,61 @@ Edge types: `calls | imports | rationale_for | semantically_similar_to`
 
 ---
 
-## 12. Frontend Architecture
+## 12. Research Formats Subsystem
+
+The **Research Formats Engine** supports generating highly specialized reports tailored to specific research intents (e.g., Academic Paper, Business Briefing, Product Spec, or Technical Report).
+
+```
+Research Loop Done 
+    → Formats Registry (`formats/registry.py`) matches query param `format`
+    → Invokes the designated pipeline in `formats/pipelines.py`
+    → Formats pipeline runs custom prompts to structure sections, summaries, and styles
+    → Returns the formatted report markdown to save in the database
+```
+
+### Core Formats
+
+- **Academic**: Exhaustive review of literature with rigorous sections (Abstract, Methodology, Analysis, Discussion).
+- **Business**: Executive summary, SWOT details, market segments, pricing models, and actionable takeaways.
+- **Product**: Product requirements, user stories (JTBD format), mockup notes, and implementation checklist.
+- **Technical**: Technical architecture, coding standards, API specifications, and database schema mappings.
+
+---
+
+## 13. Skills Loader & Execution Engine
+
+The **Skills Loader & Execution Engine** allows the agent to execute actions based on reusable, structured skills. It supports both **built-in skills** (defined in code) and **external plugins** (loaded from `external/pm-skills` using a validator script).
+
+```
+Registry loads skills from:
+  1. Built-in skill templates (JSON/YAML)
+  2. External plugins under `external/pm-skills/`
+       - Schema verified by `external/pm-skills/validate_plugins.py`
+       - Loaded at server startup via `skills/external_loader.py`
+       - Accessible for agent runtime execution
+```
+
+---
+
+## 14. Database Operations Layer (SupabaseOps)
+
+The backend wraps Supabase queries in an async database operation wrapper located in `research_engine/db/supabase/ops.py`. 
+
+```
+FastAPI Endpoints (api.py)
+    → SupabaseOps Instance (`ops.py`)
+        → wrapped in `asyncio.to_thread()` to run the sync Supabase Client concurrently
+            → Supabase REST/Postgrest endpoint
+```
+
+### Purpose
+- **Thread Safety**: Prevents the sync Supabase client from blocking FastAPI's main async event loop.
+- **Workspace Isolation**: Encapsulates workspace filtering `eq("workspace_id", workspace_id)` into clean, reusable database access routines.
+- **Unified Error Handling**: Wraps database errors into custom `SupabaseError` exceptions for consistent HTTP status responses.
+
+---
+
+## 15. Frontend Architecture
 
 ### Design System
 
@@ -485,7 +557,7 @@ Edge types: `calls | imports | rationale_for | semantically_similar_to`
 
 ---
 
-## 13. Configuration Reference
+## 16. Configuration Reference
 
 ```toml
 [llm]
@@ -528,7 +600,7 @@ mode = "deep"         # fast | deep
 
 ---
 
-## 14. Deployment
+## 17. Deployment
 
 ```bash
 # Development
@@ -542,7 +614,7 @@ uvicorn research_engine.worker:app --port 8001  # Optional webhook worker
 
 ---
 
-## 15. Key Design Decisions
+## 18. Key Design Decisions
 
 | Decision | Rationale |
 |----------|-----------|
@@ -559,4 +631,4 @@ uvicorn research_engine.worker:app --port 8001  # Optional webhook worker
 
 ---
 
-*Generated: 2026-06-26 | Source: Codebase analysis, AGENTS.md, migrations, models.py*
+*Generated: 2026-06-27 | Source: Codebase analysis, AGENTS.md, migrations, models.py*

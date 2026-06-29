@@ -1,7 +1,7 @@
 # DeepResearchAgent — Developer Guide
 
 > **Audience:** Contributors and developers working on this codebase
-> **Last Updated:** 2026-06-26
+> **Last Updated:** 2026-06-27
 
 ---
 
@@ -12,11 +12,13 @@
 3. [Development Workflow](#3-development-workflow)
 4. [Backend Patterns](#4-backend-patterns)
 5. [Frontend Patterns](#5-frontend-patterns)
-6. [Database Patterns](#6-database-patterns)
-7. [Testing](#7-testing)
-8. [Common Tasks](#8-common-tasks)
-9. [Debugging Tips](#9-debugging-tips)
-10. [Code Quality Gates](#10-code-quality-gates)
+6. [Database Operations Pattern (SupabaseOps)](#6-database-operations-pattern-supabaseops)
+7. [Research Formats Development](#7-research-formats-development)
+8. [Skills Development & Plugin Loading](#8-skills-development--plugin-loading)
+9. [Testing](#9-testing)
+10. [Common Tasks](#10-common-tasks)
+11. [Debugging Tips](#11-debugging-tips)
+12. [Code Quality Gates](#12-code-quality-gates)
 
 ---
 
@@ -72,7 +74,7 @@ OPENROUTER_API_KEY=sk-or-...
 
 ### 2.3 Run Database Migrations
 
-Apply `supabase/migrations/combined_migration.sql` in your Supabase dashboard SQL editor, or via CLI:
+Apply the migration scripts in `research_engine/db/supabase/migrations/` sequentially in your Supabase dashboard SQL editor, or via CLI:
 
 ```bash
 supabase db push
@@ -101,7 +103,7 @@ npm run dev
 curl http://localhost:8000/health
 
 # Run test suite
-python -m pytest tests/ -v
+.\.venv\Scripts\pytest
 ```
 
 ---
@@ -135,7 +137,7 @@ docs: add ARCHITECTURE.md
 - [ ] New endpoints have `verify_supabase_jwt` + `verify_workspace_membership`
 - [ ] Pydantic models updated in both `models.py` AND `frontend/src/types/api.ts`
 - [ ] `npm run build` in `frontend/` passes TypeScript
-- [ ] Tests pass: `pytest tests/ -v`
+- [ ] Tests pass: `.\.venv\Scripts\pytest`
 
 ---
 
@@ -157,10 +159,9 @@ async def my_feature(
     # ALWAYS call this manually — it's not a Depends
     await verify_workspace_membership(user_id, workspace_id)
 
-    # All Supabase calls must be wrapped in asyncio.to_thread()
-    result = await asyncio.to_thread(
-        lambda: supabase.table("my_table").select("*").execute()
-    )
+    # Use SupabaseOps layer instead of direct client calls
+    db = get_db_ops()
+    result = await db.get_my_feature_data(workspace_id)
     return MyResponse(...)
 ```
 
@@ -243,10 +244,9 @@ import aiofiles
 async with aiofiles.open(path, "r") as f:
     content = await f.read()
 
-# ✅ Correct — Supabase (sync client) wrapped in asyncio.to_thread
-result = await asyncio.to_thread(
-    lambda: supabase.table("notes").select("*").eq("workspace_id", ws_id).execute()
-)
+# ✅ Correct — DB query via SupabaseOps layer (handles thread-pooling internally)
+db = get_db_ops()
+rows = await db.get_notes(workspace_id)
 
 # ✅ Correct — parallel async operations
 results = await asyncio.gather(task1(), task2(), task3())
@@ -254,48 +254,6 @@ results = await asyncio.gather(task1(), task2(), task3())
 # ❌ Wrong — blocking the event loop
 import time; time.sleep(2)
 import requests; requests.get("https://example.com")
-```
-
-### 4.5 Error Handling Pattern
-
-```python
-from fastapi import HTTPException
-
-@app.get("/runs/{run_id}/report")
-async def get_report(run_id: str, auth_result: dict = Depends(verify_supabase_jwt)):
-    try:
-        user_id = auth_result["sub"]
-        await verify_workspace_membership(user_id, workspace_id)
-        report = await asyncio.to_thread(lambda: fetch_report(run_id))
-        if not report:
-            raise HTTPException(status_code=404, detail="Run not found")
-        return report
-    except HTTPException:
-        raise  # Re-raise HTTP exceptions as-is
-    except Exception as e:
-        logger.error(f"Failed to get report for {run_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-```
-
-### 4.6 Adding a Search Provider
-
-```python
-# research_engine/sources/web_search.py
-
-class MySearchProvider:
-    """My custom search provider."""
-
-    async def search(self, query: str, max_results: int = 10) -> list[SearchResult]:
-        # Implement using Scrapling (not requests/httpx)
-        ...
-
-# Register in factory:
-def get_search_provider(provider: str | None = None) -> SearchProvider:
-    match provider or config.search.default_provider:
-        case "my_provider":
-            return MySearchProvider()
-        case _:
-            return DuckDuckGoProvider()
 ```
 
 ---
@@ -308,7 +266,6 @@ def get_search_provider(provider: str | None = None) -> SearchProvider:
 // frontend/src/components/my-domain/MyComponent.tsx
 import { useState } from "react";
 import { SomeIcon } from "lucide-react";
-import * as Dialog from "@radix-ui/react-dialog";
 
 interface MyComponentProps {
     workspaceId: string;
@@ -362,134 +319,145 @@ export async function myFeature(
 }
 ```
 
-### 5.3 Wiki Link Syntax
-
-Supported in Notes and Documents modules:
-
-| Syntax | Target | Handler |
-|--------|--------|---------|
-| `[[Note Title]]` | Note by title | `handleWikiNavigate("note", title)` |
-| `[[run:uuid]]` | Research run | `handleWikiNavigate("run", runId)` |
-| `[[doc:filename]]` | Document | `handleWikiNavigate("doc", filename)` |
-| `[[wiki:Concept]]` | Wiki page | `handleWikiNavigate("wiki", concept)` |
-
-> `entity:` is parsed but **not yet implemented** in frontend handlers.
-
 ---
 
-## 6. Database Patterns
+## 6. Database Operations Pattern (SupabaseOps)
 
-### 6.1 Adding a New Column
+To maintain safety and thread-concurrency (since the python `supabase` SDK is synchronous), all database operations must go through the **SupabaseOps** repository layer (`research_engine/db/supabase/ops.py`).
 
-1. Add column to Supabase table (dashboard or migration SQL)
-2. Update Pydantic model in `research_engine/models.py`
-3. Update TypeScript type in `frontend/src/types/api.ts`
-4. Update queries in `research_engine/api.py` or `db/supabase/`
-5. Update frontend components that display/edit the field
-
-### 6.2 Supabase Query Patterns
+### 6.1 Calling Database Operations
 
 ```python
-# SELECT
-result = await asyncio.to_thread(
-    lambda: supabase.table("notes")
-        .select("id, title, content, updated_at")
-        .eq("workspace_id", workspace_id)
-        .order("updated_at", desc=True)
-        .limit(50)
-        .execute()
-)
-rows = result.data
+from research_engine.db.supabase.ops import SupabaseOps
+from research_engine.db.supabase.client import get_supabase_client
 
-# INSERT
-result = await asyncio.to_thread(
-    lambda: supabase.table("notes")
-        .insert({"workspace_id": ws_id, "title": title, "content": content})
-        .execute()
-)
+# Instantiate the ops layer (typically handled by a global provider helper or directly in routes)
+client = get_supabase_client()
+db = SupabaseOps(client)
 
-# UPDATE
-await asyncio.to_thread(
-    lambda: supabase.table("notes")
-        .update({"content": new_content, "updated_at": "now()"})
-        .eq("id", note_id)
-        .execute()
-)
-
-# DELETE
-await asyncio.to_thread(
-    lambda: supabase.table("notes").delete().eq("id", note_id).execute()
-)
+# Execute queries asynchronously
+notes = await db.list_notes(workspace_id)
+note = await db.get_note(note_id)
+new_note = await db.create_note({"workspace_id": ws_id, "title": "New Title", "content": "..."})
 ```
 
-### 6.3 Full-Text Search
+### 6.2 Writing a New Database Operation
+
+Add the method to `SupabaseOps` in `ops.py`. Implement async execution using `self._execute()`, which wraps the sync SDK queries in `asyncio.to_thread`:
 
 ```python
-# Notes full-text search
-result = await asyncio.to_thread(
-    lambda: supabase.table("notes")
-        .select("id, title, content, updated_at")
+# research_engine/db/supabase/ops.py
+
+async def get_recent_runs(self, workspace_id: str, limit: int = 10) -> list[dict]:
+    """Retrieve recent research runs for a workspace."""
+    result = await self._execute(
+        self._client.table("research_runs")
+        .select("*")
         .eq("workspace_id", workspace_id)
-        .text_search("search_vector", query, {"type": "websearch"})
-        .limit(20)
-        .execute()
-)
+        .order("created_at", desc=True)
+        .limit(limit)
+    )
+    return result.get("data", [])
 ```
 
 ---
 
-## 7. Testing
+## 7. Research Formats Development
+
+Research formats define the structural output of research reports. They are stored under `research_engine/formats/`.
+
+### 7.1 Creating a Research Format
+
+1. Define a pipeline class in `research_engine/formats/pipelines.py` that inherits from `BaseFormatPipeline`.
+2. Implement the `run` method, defining prompt templates and sections:
+
+```python
+# research_engine/formats/pipelines.py
+
+class MyCustomFormatPipeline(BaseFormatPipeline):
+    async def run(self, context: ResearchContext) -> str:
+        # 1. Gather research sources and summaries
+        # 2. Call LLM using formatting prompts
+        # 3. Structure and return markdown report
+        ...
+```
+
+3. Register your pipeline in `research_engine/formats/registry.py`:
+
+```python
+# research_engine/formats/registry.py
+
+from research_engine.formats.pipelines import MyCustomFormatPipeline
+
+register_format(
+    name="my-custom-format",
+    pipeline_class=MyCustomFormatPipeline,
+    description="My custom formatted research report structure"
+)
+```
+
+---
+
+## 8. Skills Development & Plugin Loading
+
+The system executes agent-level skills registered via `research_engine/skills/`.
+
+### 8.1 Registering a Built-in Skill
+
+Built-in skills are registered directly in `research_engine/skills/registry.py` under the appropriate domain namespace.
+
+### 8.2 Adding an External Plugin Skill
+
+External plugins are loaded from `external/pm-skills/`.
+1. Create your skill files under a subdirectory in `external/pm-skills/` (e.g. `external/pm-skills/my-plugin/`).
+2. Implement your skill schema metadata in `.claude-plugin/plugin.json` or as documented.
+3. Validate your plugin setup:
+```bash
+python external/pm-skills/validate_plugins.py
+```
+Valid plugins are discovered and loaded at runtime by `research_engine/skills/external_loader.py`.
+
+---
+
+## 9. Testing
+
+The codebase implements a comprehensive test suite of 489 tests across unit, database, integration, and E2E boundaries.
 
 ### Running Tests
 
 ```bash
 # All tests
-pytest tests/ -v
+.\.venv\Scripts\pytest
 
 # With coverage
-pytest tests/ --cov=research_engine --cov-report=html
+.\.venv\Scripts\pytest --cov=research_engine --cov-report=html
 
-# Specific test file
-pytest tests/test_research_pipeline.py -v
-
-# Async tests
-pytest tests/ -v --asyncio-mode=auto
+# Running a specific test category
+.\.venv\Scripts\pytest tests/db/ -v
 ```
 
-### Test Structure
+### Test Directory Structure
 
 ```
 tests/
-├── test_research_pipeline.py   # Integration test — full pipeline
-├── test_models.py              # Pydantic model validation
-├── test_wiki_links.py          # Wiki link parsing
-├── test_cache.py               # Cache behavior
-└── conftest.py                 # Shared fixtures
-```
-
-### Writing a Test
-
-```python
-# tests/test_my_feature.py
-import pytest
-from unittest.mock import AsyncMock, patch
-
-@pytest.fixture
-def mock_supabase():
-    with patch("research_engine.api.supabase") as mock:
-        mock.table.return_value.select.return_value.execute.return_value.data = []
-        yield mock
-
-@pytest.mark.asyncio
-async def test_my_feature_success(mock_supabase):
-    from research_engine.api import my_feature
-    result = await my_feature(...)
-    assert result.total == 0
+├── checkpoints/              # Checkpoint management tests
+├── citations/                # Citation verifier and adapter tests
+├── cost/                     # Token usage and cache alignment tests
+├── db/                       # SupabaseOps unit & workspace isolation tests
+│   └── supabase/
+│       └── test_ops.py
+├── e2e/                      # End-to-end user scenarios and mock client tests
+├── export/                   # Report export format tests
+├── quality/                  # Quality metrics and reviewer tests
+├── research/                 # Research formats, pipelines, and registries tests
+├── sources/                  # Scrapers, caches, and search adapters tests
+├── sse/                      # Server-Sent Events stream tests
+└── test_auth.py etc.         # Legacy base test suite
 ```
 
 ---
 
-## 8. Common Tasks
+## 10. Common Tasks
 
 ### Run Linting and Auto-Fix
 
@@ -508,47 +476,9 @@ cd frontend && npx eslint src/ --fix
 cd frontend && npm run build
 ```
 
-### Verify API Syntax
-
-```bash
-py -m py_compile research_engine/api.py
-```
-
-### Check MyPy Types
-
-```bash
-mypy research_engine/ --ignore-missing-imports
-```
-
-### Apply Migrations
-
-```bash
-# In Supabase SQL Editor — paste contents of:
-supabase/migrations/combined_migration.sql
-```
-
-### Generate Knowledge Graph Manually
-
-```bash
-python -m research_engine.cli kg-build --run-id <uuid>
-```
-
 ---
 
-## 9. Debugging Tips
-
-### Backend Not Starting
-
-```bash
-# Check for import errors
-py -m py_compile research_engine/api.py
-
-# Check env vars
-python -c "import os; print(os.getenv('SUPABASE_URL'))"
-
-# Check port conflict
-netstat -ano | findstr :8000
-```
+## 11. Debugging Tips
 
 ### 403 Errors on All Requests
 
@@ -556,46 +486,13 @@ Almost always caused by using the **anon** key instead of the **service_role** k
 
 ### SSE Not Streaming
 
-- Check CORS: `cors_origins` in `config.toml` must include `http://localhost:5173`
-- Check that the frontend is using POST (not GET) for the stream endpoint
-- Check that `run_id` exists in the database before streaming
-
-### Supabase Connection Errors
-
-```python
-# Test connection
-python -c "
-from research_engine.db.supabase.client import get_supabase_client
-client = get_supabase_client()
-print(client.table('workspaces').select('id').limit(1).execute())
-"
-```
-
-### Scrapling/Browser Errors
-
-```bash
-# Install Camoufox binary
-python -m camoufox fetch
-
-# Install Playwright browsers
-playwright install chromium
-```
-
-### Knowledge Graph Not Building
-
-```bash
-# Check Graphify is installed
-graphify --version
-
-# Check graphify-out directory
-ls research_engine/graphify-out/
-
-# Force LLM fallback by setting graphify.enabled = false in config.toml
-```
+- Check CORS: `cors_origins` in `config.toml` must include `http://localhost:5173`.
+- Check that the frontend is using POST (not GET) for the stream endpoint.
+- Check that `run_id` exists in the database before streaming.
 
 ---
 
-## 10. Code Quality Gates
+## 12. Code Quality Gates
 
 These must pass before merging:
 
@@ -605,20 +502,9 @@ These must pass before merging:
 | Formatting | `ruff format --check research_engine/` | Pass |
 | Type Check | `mypy research_engine/ --ignore-missing-imports` | < 50 errors |
 | Frontend Build | `cd frontend && npm run build` | Pass |
-| Tests | `pytest tests/ -v` | All pass |
+| Tests | `.\.venv\Scripts\pytest` | All pass |
 | API Syntax | `py -m py_compile research_engine/api.py` | Exit 0 |
-
-### Quick Quality Check Script
-
-```bash
-# Run all gates
-ruff check --fix research_engine/ && \
-ruff format research_engine/ && \
-py -m py_compile research_engine/api.py && \
-pytest tests/ -v && \
-cd frontend && npm run build
-```
 
 ---
 
-*Generated: 2026-06-26 | Maintained with the codebase*
+*Generated: 2026-06-27 | Maintained with the codebase*

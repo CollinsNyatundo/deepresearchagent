@@ -132,12 +132,16 @@ class TestFetcherChain:
         assert len(chain) >= 1, "At least one fetcher must be in the chain"
 
     def test_async_fetcher_first_in_all_tier(self):
-        from research_engine.sources.web_scraper import get_fetcher_availability, WebScraper
-        scraper = self._make_scraper("all")
-        availability = get_fetcher_availability()
-        chain = scraper._build_fetcher_chain(availability)
-        first_name, _ = chain[0]
-        assert first_name == "async_fetcher", "AsyncFetcher must be first in 'all' tier chain"
+        from unittest import mock
+        with mock.patch("shutil.which", return_value=None):
+            from research_engine.sources.web_scraper import get_fetcher_availability, WebScraper
+            scraper = self._make_scraper("all")
+            scraper.config.parallel_api_key = None
+            scraper.config.firecrawl_api_key = None
+            availability = get_fetcher_availability()
+            chain = scraper._build_fetcher_chain(availability)
+            first_name, _ = chain[0]
+            assert first_name == "async_fetcher", "AsyncFetcher must be first in 'all' tier chain"
 
     def test_basic_tier_only_has_async(self):
         from research_engine.sources.web_scraper import get_fetcher_availability, WebScraper

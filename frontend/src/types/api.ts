@@ -338,6 +338,11 @@ export type SearchQuery = {
   rationale?: string;
 };
 
+export type SearchQueryBatch = {
+  queries: SearchQuery[];
+};
+
+
 export type SearchResult = {
   url: string;
   title?: string;
@@ -412,6 +417,7 @@ export type ResearchResult = {
   completed_at: string;
   errors?: string[];
   workspace_id?: string;
+  status?: string;
 };
 
 

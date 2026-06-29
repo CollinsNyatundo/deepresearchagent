@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import contextvars
 import os
 import tomllib
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+workspace_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("workspace_id", default=None)
 
 
 class LLMConfig(BaseModel):
@@ -23,6 +26,10 @@ class LLMConfig(BaseModel):
     # 4096 leaves ~7900 tokens of headroom for input context on the free tier.
     groq_max_tokens: int = 4096
     request_timeout: int = 120  # seconds — prevents indefinite hangs on slow models
+    max_retries: int = 3
+    retry_backoff_base: float = 2.0
+    groq_min_interval: float = 4.0
+    nvidia_min_interval: float = 1.5
     presets: dict[str, str] = Field(default_factory=lambda: {
         "nemotron": "nvidia/nemotron-3-super-120b-a12b:free",
         "gpt_oss": "openai/gpt-oss-120b:free",
@@ -71,7 +78,7 @@ class SearchConfig(BaseModel):
 class ScrapingConfig(BaseModel):
     """Scrapling scraper configuration."""
 
-    max_concurrent: int = 5
+    max_concurrent: int = 10
     timeout_ms: int = 30000
     max_content_chars: int = 20000
     # Fetcher tier controls which scrapling tiers are enabled:
@@ -94,6 +101,8 @@ class ResearchConfig(BaseModel):
     enable_crossover: bool = True
     crossover_candidates: int = 3
     progress_check_interval: int = 5
+    max_history_steps: int = 5
+    confidence_threshold: float = 0.5
 
 
 class APIConfig(BaseModel):

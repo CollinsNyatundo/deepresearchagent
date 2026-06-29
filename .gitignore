@@ -116,3 +116,6 @@ nightglass-landing/
 
 # Agent-generated debug/fix reports
 fix_orchestrator_report.txt
+stdout
+**/stdout
+

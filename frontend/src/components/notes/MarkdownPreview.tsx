@@ -67,7 +67,7 @@ interface WikiLinkProps {
 }
 
 export function WikiLinkRenderer({ href, children, onNavigate }: WikiLinkProps) {
-  if (href.startsWith('wiki:') || href.startsWith('run:') || href.startsWith('doc:') || href.startsWith('entity:')) {
+  if (href.startsWith('wiki:') || href.startsWith('note:') || href.startsWith('run:') || href.startsWith('doc:') || href.startsWith('entity:')) {
     const parts = href.split(':')
     const type = parts[0]
     const target = parts.slice(1).join(':')
@@ -101,7 +101,7 @@ export function MarkdownPreview({ content, onNavigate, showExport = true, export
   const contentRef = useRef<HTMLDivElement>(null)
   const processed = content.replace(
     /\[\[([^\]]+)\]\]/g,
-    (_match, inner) => `[${inner}](${inner.includes(':') ? inner : 'wiki:' + inner})`
+    (_match, inner) => `[${inner}](${inner.includes(':') ? inner : 'note:' + inner})`
   )
 
   const handleImageExport = async (format: 'png' | 'svg') => {

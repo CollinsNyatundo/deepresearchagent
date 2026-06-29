@@ -3,22 +3,148 @@
 from __future__ import annotations
 
 import asyncio
+import functools
+import hashlib
 import json
 import logging
 import os
 import re
+import sqlite3
 from typing import Any
 
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
-from research_engine.config import LLMConfig
+from research_engine.config import LLMConfig, workspace_id_var
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Maximum retries for rate-limit / transient errors
-MAX_RETRIES = 3
-RETRY_BACKOFF_BASE = 2.0  # seconds
+
+class LLMSQLiteCache:
+    def __init__(self, db_path: str = ".llm_cache.db"):
+        self.db_path = db_path
+        self._initialized_paths = set()
+
+    @property
+    def current_db_path(self) -> str:
+        workspace_id = workspace_id_var.get()
+        if workspace_id:
+            path = Path("openkb") / workspace_id / "llm_cache.db"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            return str(path)
+        return self.db_path
+
+    def _init_db(self, path: str):
+        if path in self._initialized_paths:
+            return
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            conn = sqlite3.connect(path)
+            try:
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("PRAGMA busy_timeout=5000;")
+                cursor = conn.cursor()
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS llm_cache (
+                        key_hash TEXT PRIMARY KEY,
+                        prompt TEXT,
+                        model TEXT,
+                        provider TEXT,
+                        response TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.commit()
+            finally:
+                conn.close()
+            self._initialized_paths.add(path)
+        except Exception as e:
+            logger.warning(f"Failed to initialize SQLite LLM cache at {path}: {e}")
+
+    async def get(self, prompt: str, model: str, provider: str) -> str | None:
+        db_path = self.current_db_path
+        
+        def _get():
+            self._init_db(db_path)
+            conn = sqlite3.connect(db_path)
+            try:
+                key = f"{prompt}:{model}:{provider}"
+                key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("PRAGMA busy_timeout=5000;")
+                cursor = conn.cursor()
+                cursor.execute("SELECT response FROM llm_cache WHERE key_hash = ?", (key_hash,))
+                row = cursor.fetchone()
+                if row:
+                    return row[0]
+            except Exception as e:
+                logger.warning(f"Failed to query SQLite LLM cache: {e}")
+            finally:
+                conn.close()
+            return None
+
+        return await asyncio.to_thread(_get)
+
+    async def set(self, prompt: str, model: str, provider: str, response: str):
+        db_path = self.current_db_path
+
+        def _set():
+            self._init_db(db_path)
+            conn = sqlite3.connect(db_path)
+            try:
+                key = f"{prompt}:{model}:{provider}"
+                key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("PRAGMA busy_timeout=5000;")
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT OR REPLACE INTO llm_cache (key_hash, prompt, model, provider, response) VALUES (?, ?, ?, ?, ?)",
+                    (key_hash, prompt, model, provider, response)
+                )
+                conn.commit()
+            except Exception as e:
+                logger.warning(f"Failed to set SQLite LLM cache: {e}")
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_set)
+
+
+def cached_llm_query(func):
+    @functools.wraps(func)
+    async def wrapper(self, prompt: str, *args, **kwargs):
+        use_cache = kwargs.get("use_cache", False)
+        if not use_cache:
+            kwargs_clean = {k: v for k, v in kwargs.items() if k != "use_cache"}
+            return await func(self, prompt, *args, **kwargs_clean)
+
+        model = kwargs.get("model") or getattr(self.config, "default_model", "default")
+        provider = kwargs.get("provider") or getattr(self.config, "provider", "default")
+        
+        cache = getattr(self, "_sqlite_cache", None)
+        if cache is None:
+            cache = LLMSQLiteCache(db_path=os.path.join(os.getcwd(), ".llm_cache.db"))
+            self._sqlite_cache = cache
+            
+        cached_val = await cache.get(prompt, model, provider)
+        if cached_val is not None:
+            logger.info("LLM cache hit!")
+            if func.__name__ == "call_structured":
+                return json.loads(cached_val)
+            return cached_val
+
+        kwargs_clean = {k: v for k, v in kwargs.items() if k != "use_cache"}
+        result = await func(self, prompt, *args, **kwargs_clean)
+        
+        if func.__name__ == "call_structured":
+            await cache.set(prompt, model, provider, json.dumps(result))
+        else:
+            await cache.set(prompt, model, provider, str(result))
+            
+        return result
+    return wrapper
+
 
 
 def validate_model_id(model: str, provider: str | None = None) -> str:
@@ -76,8 +202,6 @@ class LLMProvider:
         self.nvidia_api_key = os.environ.get("NVIDIA_API_KEY", "")
         # Rate limiting: track last call time per provider
         self._last_call_time: dict[str, float] = {}
-        # Groq free tier: 20 RPM → 3s between calls, use 4s for safety
-        self._groq_min_interval = 4.0
 
     async def _rate_limit(self, provider: str) -> None:
         """Enforce rate limits between LLM calls."""
@@ -86,17 +210,18 @@ class LLMProvider:
             now = time.monotonic()
             last = self._last_call_time.get("groq", 0)
             elapsed = now - last
-            if elapsed < self._groq_min_interval:
-                delay = self._groq_min_interval - elapsed
+            min_interval = self.config.groq_min_interval
+            if elapsed < min_interval:
+                delay = min_interval - elapsed
                 logger.debug(f"Groq rate limit: waiting {delay:.1f}s")
                 await asyncio.sleep(delay)
             self._last_call_time["groq"] = time.monotonic()
         elif provider == "nvidia":
-            # NVIDIA rate limit: 40 RPM for free tier
+            # NVIDIA rate limit
             now = time.monotonic()
             last = self._last_call_time.get("nvidia", 0)
             elapsed = now - last
-            min_interval = 1.5
+            min_interval = self.config.nvidia_min_interval
             if elapsed < min_interval:
                 delay = min_interval - elapsed
                 logger.debug(f"NVIDIA rate limit: waiting {delay:.1f}s")
@@ -153,6 +278,7 @@ class LLMProvider:
             timeout=self.config.request_timeout,
         )
 
+    @cached_llm_query
     async def call(
         self,
         prompt: str,
@@ -160,6 +286,7 @@ class LLMProvider:
         model: str | None = None,
         temperature: float | None = None,
         provider: str | None = None,
+        use_cache: bool = False,
     ) -> str:
         """Unstructured async text completion with retry logic.
 
@@ -168,6 +295,7 @@ class LLMProvider:
             model: Optional model override (OpenRouter/Groq ID).
             temperature: Optional temperature override.
             provider: Optional provider override ('groq' or 'openrouter').
+            use_cache: Optional parameter to toggle local query caching.
 
         Returns:
             The model's text response.
@@ -175,16 +303,17 @@ class LLMProvider:
         llm = self._get_llm(model=model, temperature=temperature, provider=provider)
         effective_provider = provider or self.config.provider
 
-        for attempt in range(MAX_RETRIES):
+        max_retries = self.config.max_retries
+        for attempt in range(max_retries):
             try:
                 await self._rate_limit(effective_provider)
                 response = await llm.ainvoke(prompt)
                 return response.content
             except Exception as e:
-                if attempt < MAX_RETRIES - 1 and _is_retryable(e):
-                    wait = RETRY_BACKOFF_BASE ** (attempt + 1)
+                if attempt < max_retries - 1 and _is_retryable(e):
+                    wait = self.config.retry_backoff_base ** (attempt + 1)
                     logger.warning(
-                        f"LLM call failed (attempt {attempt + 1}/{MAX_RETRIES}), "
+                        f"LLM call failed (attempt {attempt + 1}/{max_retries}), "
                         f"retrying in {wait:.1f}s: {e}"
                     )
                     await asyncio.sleep(wait)
@@ -193,6 +322,7 @@ class LLMProvider:
 
         raise RuntimeError("LLM call failed after all retries")  # unreachable
 
+    @cached_llm_query
     async def call_structured(
         self,
         prompt: str,
@@ -201,6 +331,7 @@ class LLMProvider:
         model: str | None = None,
         temperature: float | None = None,
         provider: str | None = None,
+        use_cache: bool = False,
     ) -> dict[str, Any]:
         """Structured output with automatic fallback to JSON parsing.
 

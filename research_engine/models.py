@@ -65,6 +65,13 @@ class SearchQuery(BaseModel):
     rationale: str = ""
 
 
+class SearchQueryBatch(BaseModel):
+    """A batch of search queries with rationale."""
+
+    queries: list[SearchQuery]
+
+
+
 class ResearchPlanReflection(BaseModel):
     """Reflection on whether the plan needs updates."""
 
@@ -161,6 +168,7 @@ class ResearchResult(BaseModel):
     completed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     errors: list[str] = Field(default_factory=list)
     workspace_id: str | None = None
+    status: str | None = None
 
 
 class RunSummary(BaseModel):
@@ -302,7 +310,7 @@ class KGQueryRequest(BaseModel):
 class SimilarityRequest(BaseModel):
     """Request body for similarity search in knowledge graph."""
 
-    query_embedding: list[float] = Field(..., min_items=1)
+    query_embedding: list[float] = Field(..., min_length=1)
     match_threshold: float = 0.0
     match_count: int = 5
 
@@ -474,6 +482,20 @@ class RelevanceEvaluation(BaseModel):
 
     score: float = Field(ge=0.0, le=1.0)
     rationale: str
+
+
+class BatchRelevanceItem(BaseModel):
+    """Relevance evaluation item within a batch query."""
+
+    index: int
+    score: float = Field(ge=0.0, le=1.0)
+    rationale: str
+
+
+class BatchRelevanceEvaluation(BaseModel):
+    """Multiple snippet evaluations returned in a single batch LLM call."""
+
+    evaluations: list[BatchRelevanceItem] = Field(default_factory=list)
 
 
 class TelemetryResponse(BaseModel):

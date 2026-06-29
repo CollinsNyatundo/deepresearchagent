@@ -45,6 +45,34 @@ that covers an area not yet explored. Return JSON:
 }}
 """
 
+BATCH_SEARCH_QUERY_GENERATION_TEMPLATE = """\
+You are a skilled search query generator. Given a research topic, a research plan,
+and what has already been researched, generate 2-3 distinct, highly optimal search queries to be executed in parallel.
+Each query must target a different angle or aspect of the research topic and plan to maximize data coverage.
+
+Research Topic: {topic}
+
+Current Research Plan:
+{plan}
+
+Research History (what we already know):
+{history}
+
+Generate 2-3 search queries. Return JSON:
+{{
+  "queries": [
+    {{
+      "query": "first search query here",
+      "rationale": "brief explanation of why this query"
+    }},
+    {{
+      "query": "second search query here",
+      "rationale": "brief explanation of why this query"
+    }}
+  ]
+}}
+"""
+
 # ─── Answer Synthesis (enhanced for full-page content) ───────────────
 
 SEARCH_ANSWER_GENERATION_TEMPLATE = """\
@@ -349,5 +377,31 @@ Return JSON:
 {{
   "score": 0.85,
   "rationale": "Explain briefly why the snippet is relevant or irrelevant"
+}}
+"""
+
+BATCH_RELEVANCE_EVALUATION_TEMPLATE = """\
+You are an expert information relevance assessor. Rate the relevance of these search result snippets against the target sub-query.
+
+Target Sub-query: {sub_query}
+
+SearchResult Snippets:
+{snippets_list}
+
+For each snippet, evaluate if it contains useful, relevant, and credible context that answers the sub-query.
+Rate your confidence/relevance score:
+- score: 0.0 (completely irrelevant, spam, or ad) to 1.0 (highly relevant, directly answers query, high-signal content).
+- score must be between 0.0 and 1.0.
+
+Return JSON:
+{{
+  "evaluations": [
+    {{
+      "index": 0,
+      "score": 0.85,
+      "rationale": "Explain briefly why snippet 0 is relevant or irrelevant"
+    }},
+    ...
+  ]
 }}
 """
