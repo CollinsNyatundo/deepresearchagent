@@ -74,45 +74,53 @@ export default function ResearchModule() {
 
   // ─── Sidebar Content ───────────────────────────────────────────
   const sidebarContent = (
-    <div className="flex flex-col h-full p-3 gap-3">
-      {/* Workspace Selector */}
-      <WorkspaceSelector
-        selectedWorkspaceId={selectedWorkspaceId}
-        onWorkspaceSelect={setSelectedWorkspaceId}
-      />
+    <div className="flex flex-col h-full py-3 gap-0.5">
+      {/* Workspace */}
+      <div className="px-3 mb-1">
+        <p className="sidebar-section-label">Workspace</p>
+        <WorkspaceSelector
+          selectedWorkspaceId={selectedWorkspaceId}
+          onWorkspaceSelect={setSelectedWorkspaceId}
+        />
+      </div>
 
-      {/* Mode switcher */}
-      <div className="flex bg-white/[0.03] rounded-xl p-0.5">
-        {(['research', 'code-arch'] as const).map((v) => (
-          <button
-            key={v}
-            onClick={() => setGlobalView(v)}
-            className={cn(
-              'flex-1 px-2 py-1.5 text-xs font-medium rounded-lg transition-all duration-150 cursor-pointer border-none',
-              globalView === v
-                ? 'bg-white/[0.06] text-[#e0e0e0]'
-                : 'text-[#555] hover:text-[#999]'
-            )}
-          >
-            {v === 'research' ? 'Research' : 'Code Arch'}
-          </button>
-        ))}
+      {/* View mode toggle */}
+      <div className="px-3 mb-2">
+        <div className="flex bg-white/[0.03] rounded-xl p-0.5">
+          {(['research', 'code-arch'] as const).map((v) => (
+            <button
+              key={v}
+              onClick={() => setGlobalView(v)}
+              className={cn(
+                'flex-1 px-2 py-1.5 text-xs font-medium rounded-lg transition-all duration-150 cursor-pointer border-none',
+                globalView === v
+                  ? 'bg-white/[0.06] text-[#e0e0e0]'
+                  : 'text-[#555] hover:text-[#999]'
+              )}
+            >
+              {v === 'research' ? 'Research' : 'Code Arch'}
+            </button>
+          ))}
+        </div>
       </div>
 
       {globalView === 'research' && (
         <>
-          <button
-            onClick={resetToIdle}
-            className="flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl text-sm font-medium text-[#e0e0e0] bg-[#c8956c]/15 hover:bg-[#c8956c]/25 transition-colors duration-150 cursor-pointer border-none"
-          >
-            <Plus className="w-4 h-4" />
-            New Research
-          </button>
+          {/* Actions */}
+          <div className="px-3 mb-1">
+            <p className="sidebar-section-label">Actions</p>
+            <button
+              onClick={resetToIdle}
+              className="flex items-center justify-center gap-2 w-full py-2 px-3 rounded-xl text-xs font-medium text-[#e0e0e0] bg-[#c8956c]/15 hover:bg-[#c8956c]/25 transition-colors duration-150 cursor-pointer border-none"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              New Research
+            </button>
+          </div>
 
-          <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-            <div className="text-[10px] uppercase tracking-wider text-[#555] font-semibold mb-2 px-1">
-              Research Runs
-            </div>
+          {/* Research Runs */}
+          <div className="px-3 flex-1 overflow-hidden flex flex-col min-h-0">
+            <p className="sidebar-section-label">Research Runs</p>
             <div className="flex-1 overflow-y-auto min-h-0">
               <RunList
                 key={refreshKey}
@@ -140,8 +148,8 @@ export default function ResearchModule() {
       )}
 
       {globalView === 'code-arch' && (
-        <div className="flex flex-col gap-2 text-xs text-[#999] pt-2">
-          <div className="text-[10px] uppercase tracking-wider text-[#555] font-semibold">GITNEXUS WEB UI</div>
+        <div className="px-3 flex flex-col gap-2 text-xs text-[#999] pt-2">
+          <p className="sidebar-section-label">GitNexus Web UI</p>
           <p>
             The official interactive graph at{' '}
             <a href="https://gitnexus.vercel.app" target="_blank" rel="noreferrer" className="text-[#d4a574]">
@@ -152,17 +160,6 @@ export default function ResearchModule() {
           <p>Click <strong>Start Local Server</strong> in the main panel to begin.</p>
         </div>
       )}
-
-      {/* Sign Out */}
-      <div className="mt-auto pt-3 border-t border-white/[0.06] flex items-center justify-between gap-2">
-        <span className="text-xs text-[#555] truncate max-w-[140px]">{user?.email}</span>
-        <button
-          onClick={signOut}
-          className="text-xs text-[#c45a5a] hover:text-[#e0e0e0] transition-colors duration-150 cursor-pointer bg-transparent border-none"
-        >
-          Sign Out
-        </button>
-      </div>
     </div>
   )
 

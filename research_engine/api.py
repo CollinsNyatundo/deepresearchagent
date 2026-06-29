@@ -64,6 +64,7 @@ from research_engine.config import get_config
 from research_engine.db.supabase.client import get_supabase_client
 from research_engine.llm.provider import LLMProvider, validate_model_id
 from research_engine.models import (
+    AppSettings,
     CitationVerificationRequest,
     CitationVerificationResponse,
     ExpandRequest,
@@ -81,6 +82,7 @@ from research_engine.models import (
     ResearchResult,
     ResynthesizeRequest,
     RunSummary,
+    SettingsResponse,
     SimilarityRequest,
     TelemetryResponse,
 )
@@ -1922,6 +1924,139 @@ async def get_telemetry(user_data: dict = Depends(verify_supabase_jwt)):
         "active_circuit_breakers": active_circuit_breakers,
         "scraper_success_rate": scraper_success_rate,
     }
+
+
+# ─── App Settings ─────────────────────────────────────────────────────────
+
+_SETTINGS_TABLE = "app_settings"
+
+SETTINGS_DEFAULTS: dict = {
+    "default_provider": "openrouter",
+    "default_model": "openrouter/qwen/qwen3-235b-a22b:free",
+    "default_depth": 3,
+    "openrouter_api_key_enc": None,
+    "groq_api_key_enc": None,
+    "default_format": "academic",
+    "default_length": "full",
+    "default_audience": "researcher",
+    "background_mode": "moonlit",
+    "accent_color": "#c8956c",
+    "sidebar_expanded": True,
+    "default_workspace_id": None,
+}
+
+
+def _mask_key(key: str | None) -> bool:
+    """Returns True if the key is set (non-empty), False otherwise."""
+    return bool(key)
+
+
+def _simple_enc(value: str, secret: str) -> str:
+    """Lightweight XOR encoding for API keys — not crypto-secure, but prevents
+    plaintext storage in the DB. For full security, swap with Fernet/KMS."""
+    import base64
+    key_bytes = (secret * (len(value) // len(secret) + 1)).encode()[:len(value)]
+    xored = bytes(a ^ b for a, b in zip(value.encode(), key_bytes))
+    return base64.b64encode(xored).decode()
+
+
+def _simple_dec(encoded: str, secret: str) -> str:
+    import base64
+    data = base64.b64decode(encoded.encode())
+    key_bytes = (secret * (len(data) // len(secret) + 1)).encode()[:len(data)]
+    return bytes(a ^ b for a, b in zip(data, key_bytes)).decode()
+
+
+@app.get("/api/settings", response_model=SettingsResponse)
+async def get_settings(
+    workspace_id: str,
+    user_data: dict = Depends(verify_supabase_jwt),
+):
+    """Return current workspace settings. API keys are returned as boolean (set/not set)."""
+    await verify_workspace_membership(user_data["sub"], workspace_id)
+
+    supabase = get_supabase_client()
+
+    def _fetch():
+        return (
+            supabase.table(_SETTINGS_TABLE)
+            .select("*")
+            .eq("workspace_id", workspace_id)
+            .maybe_single()
+            .execute()
+        )
+
+    result = await asyncio.to_thread(_fetch)
+    row: dict = result.data or {}
+
+    merged = {**SETTINGS_DEFAULTS, **row}
+
+    return SettingsResponse(
+        workspace_id=workspace_id,
+        default_provider=merged.get("default_provider", "openrouter"),
+        default_model=merged.get("default_model", ""),
+        default_depth=int(merged.get("default_depth", 3)),
+        openrouter_api_key_set=_mask_key(merged.get("openrouter_api_key_enc")),
+        groq_api_key_set=_mask_key(merged.get("groq_api_key_enc")),
+        default_format=merged.get("default_format", "academic"),
+        default_length=merged.get("default_length", "full"),
+        default_audience=merged.get("default_audience", "researcher"),
+        background_mode=merged.get("background_mode", "moonlit"),
+        accent_color=merged.get("accent_color", "#c8956c"),
+        sidebar_expanded=bool(merged.get("sidebar_expanded", True)),
+        default_workspace_id=merged.get("default_workspace_id"),
+        updated_at=merged.get("updated_at"),
+    )
+
+
+@app.patch("/api/settings")
+async def update_settings(
+    workspace_id: str,
+    body: AppSettings,
+    user_data: dict = Depends(verify_supabase_jwt),
+):
+    """Upsert workspace settings. Pass only the fields you wish to update."""
+    await verify_workspace_membership(user_data["sub"], workspace_id)
+
+    supabase = get_supabase_client()
+    jwt_secret = config.supabase.jwt_secret if hasattr(config, "supabase") else "dra-enc"
+
+    update: dict = {"workspace_id": workspace_id}
+
+    if body.default_provider is not None:
+        update["default_provider"] = body.default_provider
+    if body.default_model is not None:
+        update["default_model"] = body.default_model
+    if body.default_depth is not None:
+        update["default_depth"] = body.default_depth
+    if body.openrouter_api_key is not None:
+        update["openrouter_api_key_enc"] = _simple_enc(body.openrouter_api_key, jwt_secret)
+    if body.groq_api_key is not None:
+        update["groq_api_key_enc"] = _simple_enc(body.groq_api_key, jwt_secret)
+    if body.default_format is not None:
+        update["default_format"] = body.default_format
+    if body.default_length is not None:
+        update["default_length"] = body.default_length
+    if body.default_audience is not None:
+        update["default_audience"] = body.default_audience
+    if body.background_mode is not None:
+        update["background_mode"] = body.background_mode
+    if body.accent_color is not None:
+        update["accent_color"] = body.accent_color
+    if body.sidebar_expanded is not None:
+        update["sidebar_expanded"] = body.sidebar_expanded
+    if body.default_workspace_id is not None:
+        update["default_workspace_id"] = body.default_workspace_id
+
+    def _upsert():
+        return (
+            supabase.table(_SETTINGS_TABLE)
+            .upsert(update, on_conflict="workspace_id")
+            .execute()
+        )
+
+    await asyncio.to_thread(_upsert)
+    return {"status": "ok", "workspace_id": workspace_id}
 
 
 async def run_resynthesis_task(

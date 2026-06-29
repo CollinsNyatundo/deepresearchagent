@@ -617,3 +617,53 @@ class QualityReviewRequest(BaseModel):
     sources: list[dict] = []
 
 
+# ─── Settings Models ──────────────────────────────────────────────────────
+
+class AppSettings(BaseModel):
+    """User-configurable application settings persisted server-side.
+
+    All fields are optional — PATCH merges with existing values.
+    Fields that map to config.toml are *display-only* read via GET;
+    write operations update a workspace-scoped settings table.
+    """
+
+    # LLM Defaults
+    default_provider: str | None = None       # "openrouter" | "groq"
+    default_model: str | None = None           # e.g. "qwen/qwen3-235b-a22b:free"
+    default_depth: int | None = Field(None, ge=1, le=5)
+
+    # API Keys (write: stored encrypted, read: masked)
+    openrouter_api_key: str | None = None      # stored; returned masked
+    groq_api_key: str | None = None            # stored; returned masked
+
+    # Research Defaults
+    default_format: str | None = None          # academic|business|technical|product|literature|data
+    default_length: str | None = None          # abstract|short|full|thesis
+    default_audience: str | None = None        # researcher|developer|executive|general
+
+    # Appearance
+    background_mode: str | None = None         # moonlit|silk|rain|solid
+    accent_color: str | None = None            # hex color string
+    sidebar_expanded: bool | None = None
+
+    # Workspace
+    default_workspace_id: str | None = None
+
+
+class SettingsResponse(BaseModel):
+    """Settings GET response — API keys returned masked."""
+
+    workspace_id: str
+    default_provider: str
+    default_model: str
+    default_depth: int
+    openrouter_api_key_set: bool
+    groq_api_key_set: bool
+    default_format: str
+    default_length: str
+    default_audience: str
+    background_mode: str
+    accent_color: str
+    sidebar_expanded: bool
+    default_workspace_id: str | None = None
+    updated_at: str | None = None

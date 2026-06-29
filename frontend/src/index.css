@@ -424,6 +424,155 @@
   }
 }
 
+@layer components {
+  /* ─── Nav Rail (icon-only sidebar mode) ──────────────────────── */
+  .nav-rail {
+    width: 48px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 0;
+    gap: 2px;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(8px) saturate(130%);
+    -webkit-backdrop-filter: blur(8px) saturate(130%);
+    border-right: 1px solid rgba(255, 255, 255, 0.06);
+    z-index: 40;
+    position: relative;
+  }
+
+  .nav-rail-item {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #555;
+    transition: all 200ms ease;
+    cursor: pointer;
+    background: transparent;
+    border: none;
+    position: relative;
+  }
+
+  .nav-rail-item:hover {
+    color: #999;
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .nav-rail-item.active {
+    color: #c8956c;
+    background: rgba(200, 149, 108, 0.12);
+  }
+
+  .nav-rail-item.active::before {
+    content: '';
+    position: absolute;
+    left: -1px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 18px;
+    border-radius: 0 3px 3px 0;
+    background: #c8956c;
+  }
+
+  /* ─── Sidebar Section Labels (Nightglass grouping) ─────────── */
+  .sidebar-section-label {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #333;
+    padding: 0 8px;
+    margin-top: 4px;
+    margin-bottom: 2px;
+    user-select: none;
+  }
+
+  /* ─── Settings Cards ──────────────────────────────────────── */
+  .settings-card {
+    background: rgba(255, 255, 255, 0.015);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 16px;
+    padding: 20px 24px;
+    position: relative;
+  }
+
+  .settings-card:hover {
+    border-color: rgba(255, 255, 255, 0.09);
+  }
+
+  .settings-input {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 9px 14px;
+    font-size: 13px;
+    color: #e0e0e0;
+    font-family: 'Fira Code', monospace;
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+    outline: none;
+  }
+
+  .settings-input:focus {
+    border-color: rgba(200, 149, 108, 0.5);
+    box-shadow: 0 0 0 3px rgba(200, 149, 108, 0.08);
+  }
+
+  .settings-input::placeholder {
+    color: #444;
+  }
+
+  /* ─── Tooltip (right-side) ─────────────────────────────────── */
+  .tooltip-right {
+    position: absolute;
+    left: calc(100% + 10px);
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(16, 16, 16, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #e0e0e0;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    padding: 5px 10px;
+    border-radius: 8px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 150ms ease, transform 150ms ease;
+    transform: translateY(-50%) translateX(-4px);
+    z-index: 100;
+    backdrop-filter: blur(8px);
+  }
+
+  .nav-rail-item:hover .tooltip-right,
+  .nav-rail-item:focus .tooltip-right {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+  }
+
+  /* ─── Sidebar collapse/expand transition ─────────────────── */
+  .sidebar-panel {
+    transition: width 250ms cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 200ms ease;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .sidebar-panel.collapsed {
+    width: 0 !important;
+    opacity: 0;
+  }
+
+  .sidebar-panel.expanded {
+    opacity: 1;
+  }
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;

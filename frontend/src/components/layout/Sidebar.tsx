@@ -1,30 +1,22 @@
+/**
+ * Sidebar — thin container that wraps module-specific sidebar content.
+ * Collapse/expand logic is owned by Layout.tsx (NavRail toggle).
+ * This component is kept for backwards-compatible prop passing from modules.
+ */
 import { type ReactNode } from 'react'
 
 interface SidebarProps {
   children: ReactNode
+  /** @deprecated open/close is now controlled by NavRail in Layout.tsx */
   open?: boolean
+  /** @deprecated */
   onClose?: () => void
 }
 
-export default function Sidebar({ children, open = true, onClose }: SidebarProps) {
+export default function Sidebar({ children }: SidebarProps) {
   return (
-    <>
-      {/* Mobile overlay */}
-      {open && (
-        <div
-          className="lg:hidden fixed inset-0 bg-black/50 z-20"
-          onClick={onClose}
-        />
-      )}
-      <aside
-        className={`flex-shrink-0 liquid-glass overflow-hidden flex flex-col z-30 relative transition-all duration-200
-          ${open
-            ? 'w-[15rem] translate-x-0'
-            : 'w-0 -translate-x-full lg:w-[15rem] lg:translate-x-0'
-          }`}
-      >
-        <div className="w-[15rem] h-full">{children}</div>
-      </aside>
-    </>
+    <div className="flex flex-col h-full">
+      {children}
+    </div>
   )
 }
