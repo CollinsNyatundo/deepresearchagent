@@ -6,6 +6,7 @@ import { useAuth } from './lib/authContext'
 import LoginPrompt from './components/LoginPrompt'
 import CommandPalette from './components/CommandPalette'
 import TodoDemo from './components/TodoDemo'
+import { ResearchProvider } from './lib/researchContext'
 
 const ResearchModule = lazy(() => import('./modules/research/ResearchModule'))
 const NotesModule = lazy(() => import('./modules/notes/NotesModule'))
@@ -36,28 +37,30 @@ export default function App() {
 
   return (
     <BackgroundProvider>
-      <CommandPalette />
-      <Suspense fallback={<LoadingFallback />}>
-        <Routes>
-          <Route path="/research/*" element={<ResearchModule />} />
-          <Route path="/notes/*" element={<NotesModule />} />
-          <Route path="/documents/*" element={<DocumentsModule />} />
-          <Route path="/todo" element={<TodoDemo />} />
-          <Route path="/" element={<Navigate to="/research" replace />} />
-        </Routes>
-      </Suspense>
-      <Toaster 
-        position="bottom-right" 
-        theme="dark" 
-        toastOptions={{
-          style: {
-            background: 'rgba(0,0,0,0.9)',
-            border: '1px solid rgba(255,255,255,0.06)',
-            color: '#e0e0e0',
-            backdropFilter: 'blur(6px) saturate(140%)',
-          },
-        }}
-      />
+      <ResearchProvider>
+        <CommandPalette />
+        <Suspense fallback={<LoadingFallback />}>
+          <Routes>
+            <Route path="/research/*" element={<ResearchModule />} />
+            <Route path="/notes/*" element={<NotesModule />} />
+            <Route path="/documents/*" element={<DocumentsModule />} />
+            <Route path="/todo" element={<TodoDemo />} />
+            <Route path="/" element={<Navigate to="/research" replace />} />
+          </Routes>
+        </Suspense>
+        <Toaster 
+          position="bottom-right" 
+          theme="dark" 
+          toastOptions={{
+            style: {
+              background: 'rgba(0,0,0,0.9)',
+              border: '1px solid rgba(255,255,255,0.06)',
+              color: '#e0e0e0',
+              backdropFilter: 'blur(6px) saturate(140%)',
+            },
+          }}
+        />
+      </ResearchProvider>
     </BackgroundProvider>
   )
 }

@@ -171,6 +171,49 @@ async def _export_corpus(result: ResearchResult, corpus_dir: Path) -> None:
     )
 
 
+def _build_and_export_graph_sync(extraction, corpus_dir, output_dir, detection, root_id, result_query):
+    """Synchronous CPU-heavy worker executing Graphify build, clustering, and HTML rendering."""
+    from graphify.analyze import god_nodes, suggest_questions, surprising_connections
+    from graphify.build import build_from_json
+    from graphify.cluster import cluster, score_all
+    from graphify.detect import save_manifest
+    from graphify.export import to_html, to_json
+    from graphify.report import generate
+
+    # 3. Build graph & cluster
+    G = build_from_json(extraction)
+    communities = cluster(G)
+    cohesion = score_all(G, communities)
+    gods = god_nodes(G)
+    surprises = surprising_connections(G, communities)
+
+    # 4. Community labeling
+    labels = {}
+    for cid, node_ids in communities.items():
+        comm_nodes = [n for n in extraction["nodes"] if n["id"] in node_ids]
+        keywords = [n["label"] for n in comm_nodes if n["id"] not in ("root",) and not n["id"].startswith("cycle_")][:3]
+        labels[cid] = " & ".join(keywords) if keywords else f"Community {cid}"
+
+    questions = suggest_questions(G, communities, labels)
+
+    # 5. Report generation
+    tokens = {"input": extraction.get("input_tokens", 0), "output": extraction.get("output_tokens", 0)}
+    report = generate(
+        G, communities, cohesion, labels, gods, surprises,
+        detection, tokens, str(corpus_dir),
+        suggested_questions=questions
+    )
+
+    # 6. Save outputs
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "GRAPH_REPORT.md").write_text(report, encoding="utf-8")
+    to_json(G, communities, str(output_dir / "graph.json"))
+    to_html(G, communities, str(output_dir / "graph.html"), community_labels=labels)
+
+    # Save manifest
+    save_manifest(detection["files"], str(output_dir / "manifest.json"))
+
+
 async def _run_graphify(
     corpus_dir: Path,
     output_dir: Path,
@@ -199,8 +242,8 @@ async def _run_graphify(
             cfg = get_config()
             llm = LLMProvider(config=cfg.llm)
 
-        # 1. Run detection
-        detection = detect(corpus_dir)
+        # 1. Run detection in a worker thread to avoid blocking the event loop
+        detection = await asyncio.to_thread(detect, corpus_dir)
 
         # 2. Concept extraction using LLM
         extraction = {
@@ -392,38 +435,20 @@ Output valid JSON matching this schema:
                         "weight": 1.0,
                     })
 
-        # 3. Build graph & cluster
-        G = build_from_json(extraction)
-        communities = cluster(G)
-        cohesion = score_all(G, communities)
-        gods = god_nodes(G)
-        surprises = surprising_connections(G, communities)
+        # Set token counts on extraction dict to pass to sync helper
+        extraction["input_tokens"] = input_tokens
+        extraction["output_tokens"] = output_tokens
 
-        # 4. Community labeling
-        labels = {}
-        for cid, node_ids in communities.items():
-            comm_nodes = [n for n in extraction["nodes"] if n["id"] in node_ids]
-            keywords = [n["label"] for n in comm_nodes if n["id"] not in ("root",) and not n["id"].startswith("cycle_")][:3]
-            labels[cid] = " & ".join(keywords) if keywords else f"Community {cid}"
-
-        questions = suggest_questions(G, communities, labels)
-
-        # 5. Report generation
-        tokens = {"input": input_tokens, "output": output_tokens}
-        report = generate(
-            G, communities, cohesion, labels, gods, surprises,
-            detection, tokens, str(corpus_dir),
-            suggested_questions=questions
+        # Run CPU-bound graph operations in a worker thread
+        await asyncio.to_thread(
+            _build_and_export_graph_sync,
+            extraction,
+            corpus_dir,
+            output_dir,
+            detection,
+            root_id,
+            result.query
         )
-
-        # 6. Save outputs
-        output_dir.mkdir(parents=True, exist_ok=True)
-        (output_dir / "GRAPH_REPORT.md").write_text(report, encoding="utf-8")
-        to_json(G, communities, str(output_dir / "graph.json"))
-        to_html(G, communities, str(output_dir / "graph.html"), community_labels=labels)
-
-        # Save manifest
-        save_manifest(detection["files"], str(output_dir / "manifest.json"))
 
         logger.info(f"Successfully generated in-process knowledge graph for {corpus_dir}")
         return True
@@ -443,124 +468,127 @@ async def _parse_graphify_output(output_dir: Path, run_id: str) -> KnowledgeGrap
 
     async with aiofiles.open(graph_json_path, encoding="utf-8") as f:
         raw = await f.read()
-    data = json.loads(raw)
 
-    nodes: list[KGNode] = []
-    edges: list[KGEdge] = []
-    communities: list[KGCommunity] = []
-    god_nodes: list[str] = []
-    surprise_edges: list[SurpriseEdge] = []
+    def _parse_sync(raw_data: str) -> KnowledgeGraph:
+        data = json.loads(raw_data)
 
-    # Parse nodes — graphify graph.json uses 'nodes' array
-    raw_nodes = data.get("nodes", [])
-    raw_edges = data.get("edges", data.get("links", []))
-    degree_map: dict[str, int] = {}
+        nodes: list[KGNode] = []
+        edges: list[KGEdge] = []
+        communities: list[KGCommunity] = []
+        god_nodes: list[str] = []
+        surprise_edges: list[SurpriseEdge] = []
 
-    # Count degrees from edges first
-    for raw_edge in raw_edges:
-        src = str(raw_edge.get("source", raw_edge.get("u", "")))
-        tgt = str(raw_edge.get("target", raw_edge.get("v", "")))
-        degree_map[src] = degree_map.get(src, 0) + 1
-        degree_map[tgt] = degree_map.get(tgt, 0) + 1
+        # Parse nodes — graphify graph.json uses 'nodes' array
+        raw_nodes = data.get("nodes", [])
+        raw_edges = data.get("edges", data.get("links", []))
+        degree_map: dict[str, int] = {}
 
-    # Find god nodes (top N by degree)
-    sorted_by_degree = sorted(degree_map.items(), key=lambda x: x[1], reverse=True)
-    god_node_ids = {nid for nid, _ in sorted_by_degree[:GOD_NODE_TOP_N]}
+        # Count degrees from edges first
+        for raw_edge in raw_edges:
+            src = str(raw_edge.get("source", raw_edge.get("u", "")))
+            tgt = str(raw_edge.get("target", raw_edge.get("v", "")))
+            degree_map[src] = degree_map.get(src, 0) + 1
+            degree_map[tgt] = degree_map.get(tgt, 0) + 1
 
-    for raw_node in raw_nodes:
-        node_id = str(raw_node.get("id", raw_node.get("n", "")))
-        if not node_id:
-            continue
-        degree = degree_map.get(node_id, 0)
-        nodes.append(KGNode(
-            id=node_id,
-            label=str(raw_node.get("label", raw_node.get("name", node_id))),
-            type=str(raw_node.get("type", raw_node.get("kind", "concept"))),
-            community=int(raw_node.get("community", raw_node.get("cluster", 0))),
-            degree=degree,
-            is_god_node=node_id in god_node_ids,
-            provenance=str(raw_node.get("provenance", "EXTRACTED")),
-            confidence=float(raw_node.get("confidence", 1.0)),
-            summary=str(raw_node.get("summary", raw_node.get("description", ""))),
-            file_path=str(raw_node.get("file_path", raw_node.get("path", ""))),
-        ))
+        # Find god nodes (top N by degree)
+        sorted_by_degree = sorted(degree_map.items(), key=lambda x: x[1], reverse=True)
+        god_node_ids = {nid for nid, _ in sorted_by_degree[:GOD_NODE_TOP_N]}
 
-    god_nodes = list(god_node_ids)
-
-    # Parse edges
-    for raw_edge in raw_edges:
-        src = str(raw_edge.get("source", raw_edge.get("u", "")))
-        tgt = str(raw_edge.get("target", raw_edge.get("v", "")))
-        if not src or not tgt:
-            continue
-        raw_conf = raw_edge.get("confidence_score") or raw_edge.get("confidence")
-        try:
-            confidence_val = float(raw_conf) if raw_conf is not None else 1.0
-        except ValueError:
-            confidence_val = 1.0
-        edges.append(KGEdge(
-            source=src,
-            target=tgt,
-            type=str(raw_edge.get("type", raw_edge.get("label", "semantically_similar_to"))),
-            provenance=str(raw_edge.get("provenance", "EXTRACTED")),
-            confidence=confidence_val,
-            label=str(raw_edge.get("label", "")),
-        ))
-
-    # Parse communities
-    raw_communities = data.get("communities", data.get("clusters", {}))
-    if isinstance(raw_communities, dict):
-        for cid_str, cdata in raw_communities.items():
-            communities.append(KGCommunity(
-                id=int(cid_str),
-                label=str(cdata.get("label", cdata.get("name", f"Community {cid_str}"))),
-                node_count=int(cdata.get("size", cdata.get("node_count", 0))),
-                keywords=list(cdata.get("keywords", [])),
-                description=str(cdata.get("description", "")),
-            ))
-    elif isinstance(raw_communities, list):
-        for i, cdata in enumerate(raw_communities):
-            communities.append(KGCommunity(
-                id=i,
-                label=str(cdata.get("label", f"Community {i}")),
-                node_count=int(cdata.get("size", cdata.get("node_count", 0))),
-                keywords=list(cdata.get("keywords", [])),
+        for raw_node in raw_nodes:
+            node_id = str(raw_node.get("id", raw_node.get("n", "")))
+            if not node_id:
+                continue
+            degree = degree_map.get(node_id, 0)
+            nodes.append(KGNode(
+                id=node_id,
+                label=str(raw_node.get("label", raw_node.get("name", node_id))),
+                type=str(raw_node.get("type", raw_node.get("kind", "concept"))),
+                community=int(raw_node.get("community", raw_node.get("cluster", 0))),
+                degree=degree,
+                is_god_node=node_id in god_node_ids,
+                provenance=str(raw_node.get("provenance", "EXTRACTED")),
+                confidence=float(raw_node.get("confidence", 1.0)),
+                summary=str(raw_node.get("summary", raw_node.get("description", ""))),
+                file_path=str(raw_node.get("file_path", raw_node.get("path", ""))),
             ))
 
-    # Parse surprise edges
-    for raw_surprise in data.get("surprises", data.get("surprise_edges", []))[:SURPRISE_EDGE_TOP_N]:
-        surprise_edges.append(SurpriseEdge(
-            source=str(raw_surprise.get("source", raw_surprise.get("u", ""))),
-            target=str(raw_surprise.get("target", raw_surprise.get("v", ""))),
-            reason=str(raw_surprise.get("reason", raw_surprise.get("why", ""))),
-            score=float(raw_surprise.get("score", 0.0)),
-        ))
+        god_nodes = list(god_node_ids)
 
-    # Compute corpus stats and token estimates
-    n_nodes = len(nodes)
-    n_edges = len(edges)
-    # Rough estimate: 300 tokens per raw content block, 1.7k for a BFS query
-    naive_cost = len(raw_nodes) * 300
-    graph_cost = 1700
-    compression = round(naive_cost / graph_cost, 1) if graph_cost > 0 else 0.0
+        # Parse edges
+        for raw_edge in raw_edges:
+            src = str(raw_edge.get("source", raw_edge.get("u", "")))
+            tgt = str(raw_edge.get("target", raw_edge.get("v", "")))
+            if not src or not tgt:
+                continue
+            raw_conf = raw_edge.get("confidence_score") or raw_edge.get("confidence")
+            try:
+                confidence_val = float(raw_conf) if raw_conf is not None else 1.0
+            except ValueError:
+                confidence_val = 1.0
+            edges.append(KGEdge(
+                source=src,
+                target=tgt,
+                type=str(raw_edge.get("type", raw_edge.get("label", "semantically_similar_to"))),
+                provenance=str(raw_edge.get("provenance", "EXTRACTED")),
+                confidence=confidence_val,
+                label=str(raw_edge.get("label", "")),
+            ))
 
-    return KnowledgeGraph(
-        run_id=run_id,
-        nodes=nodes,
-        edges=edges,
-        communities=communities,
-        god_nodes=god_nodes,
-        surprise_edges=surprise_edges,
-        graphify_version=str(data.get("graphify_version", data.get("version", ""))),
-        corpus_stats={
-            "total_nodes": n_nodes,
-            "total_edges": n_edges,
-            "total_communities": len(communities),
-        },
-        naive_token_cost=naive_cost,
-        graph_token_cost=graph_cost,
-        compression_ratio=compression,
-    )
+        # Parse communities
+        raw_communities = data.get("communities", data.get("clusters", {}))
+        if isinstance(raw_communities, dict):
+            for cid_str, cdata in raw_communities.items():
+                communities.append(KGCommunity(
+                    id=int(cid_str),
+                    label=str(cdata.get("label", cdata.get("name", f"Community {cid_str}"))),
+                    node_count=int(cdata.get("size", cdata.get("node_count", 0))),
+                    keywords=list(cdata.get("keywords", [])),
+                    description=str(cdata.get("description", "")),
+                ))
+        elif isinstance(raw_communities, list):
+            for i, cdata in enumerate(raw_communities):
+                communities.append(KGCommunity(
+                    id=i,
+                    label=str(cdata.get("label", f"Community {i}")),
+                    node_count=int(cdata.get("size", cdata.get("node_count", 0))),
+                    keywords=list(cdata.get("keywords", [])),
+                ))
+
+        # Parse surprise edges
+        for raw_surprise in data.get("surprises", data.get("surprise_edges", []))[:SURPRISE_EDGE_TOP_N]:
+            surprise_edges.append(SurpriseEdge(
+                source=str(raw_surprise.get("source", raw_surprise.get("u", ""))),
+                target=str(raw_surprise.get("target", raw_surprise.get("v", ""))),
+                reason=str(raw_surprise.get("reason", raw_surprise.get("why", ""))),
+                score=float(raw_surprise.get("score", 0.0)),
+            ))
+
+        # Compute corpus stats and token estimates
+        n_nodes = len(nodes)
+        n_edges = len(edges)
+        naive_cost = len(raw_nodes) * 300
+        graph_cost = 1700
+        compression = round(naive_cost / graph_cost, 1) if graph_cost > 0 else 0.0
+
+        return KnowledgeGraph(
+            run_id=run_id,
+            nodes=nodes,
+            edges=edges,
+            communities=communities,
+            god_nodes=god_nodes,
+            surprise_edges=surprise_edges,
+            graphify_version=str(data.get("graphify_version", data.get("version", ""))),
+            corpus_stats={
+                "total_nodes": n_nodes,
+                "total_edges": n_edges,
+                "total_communities": len(communities),
+            },
+            naive_token_cost=naive_cost,
+            graph_token_cost=graph_cost,
+            compression_ratio=compression,
+        )
+
+    return await asyncio.to_thread(_parse_sync, raw)
 
 
 async def _build_lightweight_graph(result: ResearchResult, run_dir: Path) -> KnowledgeGraph:
@@ -571,60 +599,63 @@ async def _build_lightweight_graph(result: ResearchResult, run_dir: Path) -> Kno
     - Citations = linked nodes
     - The final report's sections = section nodes
     """
-    nodes: list[KGNode] = []
-    edges: list[KGEdge] = []
+    def _build_sync() -> KnowledgeGraph:
+        nodes: list[KGNode] = []
+        edges: list[KGEdge] = []
 
-    # Root node
-    root_id = "root"
-    nodes.append(KGNode(
-        id=root_id,
-        label=result.query[:80],
-        type="concept",
-        community=0,
-        degree=len(result.steps),
-        is_god_node=True,
-        summary=f"Research query: {result.query}",
-    ))
-
-    # Cycle nodes
-    for i, step in enumerate(result.steps):
-        node_id = f"cycle_{i}"
+        # Root node
+        root_id = "root"
         nodes.append(KGNode(
-            id=node_id,
-            label=step.query.query[:60],
+            id=root_id,
+            label=result.query[:80],
             type="concept",
             community=0,
-            degree=1 + len(step.answer.citations),
+            degree=len(result.steps),
+            is_god_node=True,
+            summary=f"Research query: {result.query}",
         ))
-        edges.append(KGEdge(source=root_id, target=node_id, type="has_step"))
 
-        # Citation nodes attached to this cycle
-        for cit in step.answer.citations[:3]:
-            cit_id = f"cit_{cit.id}"
-            if not any(n.id == cit_id for n in nodes):
-                nodes.append(KGNode(
-                    id=cit_id,
-                    label=(cit.title or cit.url)[:60],
-                    type="paper",
-                    community=1,
-                    degree=1,
-                    file_path=cit.url,
-                ))
-            edges.append(KGEdge(source=node_id, target=cit_id, type="references"))
+        # Cycle nodes
+        for i, step in enumerate(result.steps):
+            node_id = f"cycle_{i}"
+            nodes.append(KGNode(
+                id=node_id,
+                label=step.query.query[:60],
+                type="concept",
+                community=0,
+                degree=1 + len(step.answer.citations),
+            ))
+            edges.append(KGEdge(source=root_id, target=node_id, type="has_step"))
 
-    return KnowledgeGraph(
-        run_id=result.run_id,
-        nodes=nodes,
-        edges=edges,
-        communities=[
-            KGCommunity(id=0, label="Research Steps", node_count=len(result.steps) + 1),
-            KGCommunity(id=1, label="Citations", node_count=len(result.citations)),
-        ],
-        god_nodes=[root_id],
-        naive_token_cost=len(result.steps) * 300,
-        graph_token_cost=1700,
-        compression_ratio=round(len(result.steps) * 300 / 1700, 1),
-    )
+            # Citation nodes attached to this cycle
+            for cit in step.answer.citations[:3]:
+                cit_id = f"cit_{cit.id}"
+                if not any(n.id == cit_id for n in nodes):
+                    nodes.append(KGNode(
+                        id=cit_id,
+                        label=(cit.title or cit.url)[:60],
+                        type="paper",
+                        community=1,
+                        degree=1,
+                        file_path=cit.url,
+                    ))
+                edges.append(KGEdge(source=node_id, target=cit_id, type="references"))
+
+        return KnowledgeGraph(
+            run_id=result.run_id,
+            nodes=nodes,
+            edges=edges,
+            communities=[
+                KGCommunity(id=0, label="Research Steps", node_count=len(result.steps) + 1),
+                KGCommunity(id=1, label="Citations", node_count=len(result.citations)),
+            ],
+            god_nodes=[root_id],
+            naive_token_cost=len(result.steps) * 300,
+            graph_token_cost=1700,
+            compression_ratio=round(len(result.steps) * 300 / 1700, 1),
+        )
+
+    return await asyncio.to_thread(_build_sync)
 
 
 def _graphify_available() -> bool:

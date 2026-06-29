@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import contextvars
 import os
 import tomllib
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+workspace_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("workspace_id", default=None)
 
 
 class LLMConfig(BaseModel):

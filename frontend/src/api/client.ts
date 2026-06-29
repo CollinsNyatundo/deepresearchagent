@@ -584,7 +584,10 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error(`Failed to create note: ${res.status}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(body.detail || `Failed to create note: ${res.status}`);
+    }
     return res.json();
   },
 
@@ -594,13 +597,19 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error(`Failed to update note: ${res.status}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(body.detail || `Failed to update note: ${res.status}`);
+    }
     return res.json();
   },
 
   deleteNote: async (noteId: string): Promise<{ status: string; id: string }> => {
     const res = await fetch(`${BASE_URL}/notes/${noteId}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error(`Failed to delete note: ${res.status}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(body.detail || `Failed to delete note: ${res.status}`);
+    }
     return res.json();
   },
 
@@ -610,7 +619,10 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids }),
     });
-    if (!res.ok) throw new Error(`Failed to bulk delete notes: ${res.status}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(body.detail || `Failed to bulk delete notes: ${res.status}`);
+    }
     return res.json();
   },
 
@@ -743,7 +755,10 @@ export const api = {
       method: "POST",
       body: formData,
     });
-    if (!res.ok) throw new Error(`Failed to seed notes: ${res.status}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(body.detail || `Failed to seed notes: ${res.status}`);
+    }
     return res.json();
   },
 

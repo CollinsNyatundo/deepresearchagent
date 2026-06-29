@@ -33,6 +33,12 @@ export default function NotesModule() {
   const [tags, setTags] = useState<string[]>([])
   const [tagInput, setTagInput] = useState('')
 
+  // NEW: Format taxonomy for cross-module research
+  const [researchFormat, setResearchFormat] = useState('academic')
+  const [researchLength, setResearchLength] = useState('full')
+  const [researchAudience] = useState('researcher')
+  const [researchExport] = useState('markdown')
+
   // Module memory: persist view mode
   useEffect(() => {
     const saved = localStorage.getItem('notes_view_mode')
@@ -87,6 +93,10 @@ export default function NotesModule() {
         query: `Research: ${title || selectedNote.title}`,
         mode: 'web',
         depth: 3,
+        format: researchFormat,
+        length: researchLength,
+        audience: researchAudience,
+        export_format: researchExport,
       })
       navigate(`/research?run=${res.run_id}`)
     } catch (err) {
@@ -437,6 +447,33 @@ export default function NotesModule() {
                   </button>
                 </div>
               )}
+              {/* Cross-module format selector */}
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={researchFormat}
+                  onChange={(e) => setResearchFormat(e.target.value)}
+                  className="bg-white/[0.03] border border-white/[0.06] rounded-lg px-2 py-1 text-[10px] text-[#999] focus:outline-none focus:border-[#c8956c]/40 cursor-pointer"
+                  title="Research format"
+                >
+                  <option value="academic">Academic</option>
+                  <option value="business">Business</option>
+                  <option value="technical">Technical</option>
+                  <option value="product">Product</option>
+                  <option value="literature">Literature</option>
+                  <option value="data">Data</option>
+                </select>
+                <select
+                  value={researchLength}
+                  onChange={(e) => setResearchLength(e.target.value)}
+                  className="bg-white/[0.03] border border-white/[0.06] rounded-lg px-2 py-1 text-[10px] text-[#999] focus:outline-none focus:border-[#c8956c]/40 cursor-pointer"
+                  title="Length"
+                >
+                  <option value="abstract">Abstract</option>
+                  <option value="short">Short</option>
+                  <option value="full">Full</option>
+                  <option value="thesis">Thesis</option>
+                </select>
+              </div>
               <button
                 onClick={handleResearchThisTopic}
                 className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs bg-[#c8956c]/15 text-[#c8956c] hover:bg-[#c8956c]/25 transition-colors cursor-pointer border-none"

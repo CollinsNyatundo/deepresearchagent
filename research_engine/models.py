@@ -65,6 +65,13 @@ class SearchQuery(BaseModel):
     rationale: str = ""
 
 
+class SearchQueryBatch(BaseModel):
+    """A batch of search queries with rationale."""
+
+    queries: list[SearchQuery]
+
+
+
 class ResearchPlanReflection(BaseModel):
     """Reflection on whether the plan needs updates."""
 

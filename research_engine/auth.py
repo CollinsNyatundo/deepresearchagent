@@ -53,8 +53,8 @@ async def verify_supabase_jwt(
             "Do NOT use this in production."
         )
         return {
-            "sub": "dev-bypass-user",
-            "email": "dev@localhost",
+            "sub": "22222222-2222-2222-2222-222222222222",
+            "email": "dev-bypass-user@localhost",
             "role": "authenticated",
             "app_metadata": {"role": "admin"},
         }

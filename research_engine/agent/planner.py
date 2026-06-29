@@ -105,7 +105,7 @@ async def reflect_on_plan(
     )
 
     try:
-        result = await llm.call_structured(prompt, ResearchPlanReflection, model=model, provider=provider)
+        result = await llm.call_structured(prompt, ResearchPlanReflection, model=model, provider=provider, use_cache=True)
         reflection = ResearchPlanReflection(**result)
         logger.info(f"Plan reflection: should_update={reflection.should_update}")
         return reflection
@@ -133,7 +133,7 @@ async def update_plan(
     )
 
     try:
-        result = await llm.call_structured(prompt, ResearchPlan, model=model, provider=provider)
+        result = await llm.call_structured(prompt, ResearchPlan, model=model, provider=provider, use_cache=True)
         updated = ResearchPlan(**result)
         logger.info(f"Updated research plan: {len(updated.steps)} steps")
         return updated
@@ -159,7 +159,7 @@ async def check_progress(
     )
 
     try:
-        result = await llm.call_structured(prompt, ResearchProgress, model=model, provider=provider)
+        result = await llm.call_structured(prompt, ResearchProgress, model=model, provider=provider, use_cache=True)
         progress = ResearchProgress(**result).progress
         logger.info(f"Research progress: {progress}%")
         return max(0, min(100, progress))

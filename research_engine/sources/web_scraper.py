@@ -297,6 +297,7 @@ class WebScraper:
         self.config = config or ScrapingConfig()
         self.cache_manager = cache_manager
         self.circuit_breaker = circuit_breaker
+        self.browser_semaphore = asyncio.Semaphore(3)
         self._dynamic_session = None
         self._stealthy_patchright_session = None
         self._stealthy_camoufox_session = None
@@ -403,7 +404,12 @@ class WebScraper:
             logger.debug(f"[{fetcher_name}] Trying {url}")
             if on_progress:
                 await on_progress(url, "TRYING_TIER", {"fetcher": fetcher_name})
-            page = await fetcher_fn(url)
+            
+            if fetcher_name in ("dynamic_fetcher", "stealthy_patchright", "stealthy_camoufox"):
+                async with self.browser_semaphore:
+                    page = await fetcher_fn(url)
+            else:
+                page = await fetcher_fn(url)
 
             status = getattr(page, "status", None)
             if original_status is None:

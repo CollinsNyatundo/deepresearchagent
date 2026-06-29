@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import collections
 import logging
+import math
+import re
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 from research_engine.llm.prompts import (
     SEARCH_ANSWER_GENERATION_TEMPLATE,
     SEARCH_QUERY_GENERATION_TEMPLATE,
+    BATCH_SEARCH_QUERY_GENERATION_TEMPLATE,
 )
 from research_engine.llm.provider import LLMProvider
 from research_engine.models import (
@@ -20,6 +24,7 @@ from research_engine.models import (
     ScrapedPage,
     SearchAnswer,
     SearchQuery,
+    SearchQueryBatch,
     SearchResult,
 )
 from research_engine.sources.web_scraper import WebScraper
@@ -53,6 +58,37 @@ async def generate_query(
         logger.warning(f"Query generation failed: {e}")
         # Fallback: use the topic directly
         return SearchQuery(query=topic, rationale="Fallback: using topic as query")
+
+
+async def generate_query_batch(
+    topic: str,
+    plan: ResearchPlan,
+    history: str,
+    *,
+    llm: LLMProvider,
+    model: str | None = None,
+    provider: str | None = None,
+) -> list[SearchQuery]:
+    """Generate a batch of 2-3 optimal search queries to be executed in parallel."""
+    prompt = BATCH_SEARCH_QUERY_GENERATION_TEMPLATE.format(
+        topic=topic,
+        plan="\n".join(f"- {s}" for s in plan.steps),
+        history=history,
+    )
+
+    try:
+        result = await llm.call_structured(prompt, SearchQueryBatch, model=model, provider=provider)
+        batch = SearchQueryBatch(**result)
+        logger.info(f"Generated batch queries: {[q.query for q in batch.queries]}")
+        if not batch.queries:
+            raise ValueError("Empty queries list in generated batch")
+        return batch.queries
+    except Exception as e:
+        logger.warning(f"Batch query generation failed: {e}. Falling back to single query.")
+        # Fallback to single query wrapped in a list
+        single_query = await generate_query(topic, plan, history, llm=llm, model=model, provider=provider)
+        return [single_query]
+
 
 
 async def _evaluate_relevance(
@@ -154,6 +190,68 @@ async def _evaluate_relevance_batch(
             for r in results
         ]
         return await asyncio.gather(*tasks)
+def _tfidf_score(query: str, snippet: str) -> float:
+    """Compute a lightweight TF-IDF cosine similarity score between query and snippet."""
+    if not snippet or len(snippet.strip()) < 20:
+        return 0.0
+    
+    # Tokenize and lowercase
+    def tokenize(text: str) -> list[str]:
+        return [w for w in re.findall(r"\w+", text.lower()) if len(w) > 1]
+
+    q_tokens = tokenize(query)
+    s_tokens = tokenize(snippet)
+    
+    if not q_tokens or not s_tokens:
+        return 0.0
+
+    # TF for query and snippet
+    q_tf = collections.Counter(q_tokens)
+    s_tf = collections.Counter(s_tokens)
+
+    # Cosine similarity
+    all_words = set(q_tf.keys()).union(set(s_tf.keys()))
+    dot_product = sum(q_tf.get(w, 0) * s_tf.get(w, 0) for w in all_words)
+    q_magnitude = math.sqrt(sum(v ** 2 for v in q_tf.values()))
+    s_magnitude = math.sqrt(sum(v ** 2 for v in s_tf.values()))
+    
+    if q_magnitude == 0 or s_magnitude == 0:
+        return 0.0
+        
+    return dot_product / (q_magnitude * s_magnitude)
+
+
+def pre_filter_search_results(
+    query: str,
+    results: list[SearchResult],
+    min_score: float = 0.05
+) -> tuple[list[SearchResult], list[SearchResult]]:
+    """Pre-filter search results using lightweight length and word overlap checks.
+    
+    Returns a tuple of (keep_results, filter_out_results).
+    """
+    keep = []
+    filtered_out = []
+    
+    for r in results:
+        snippet = r.snippet or ""
+        # 1. Junk length check
+        if len(snippet.strip()) < 20:
+            r.relevance_score = 0.0
+            r.eval_rationale = "Pre-filtered: Snippet too short (<20 characters)."
+            filtered_out.append(r)
+            continue
+            
+        # 2. Cosine similarity word overlap check
+        score = _tfidf_score(query, snippet)
+        if score < min_score:
+            r.relevance_score = 0.0
+            r.eval_rationale = f"Pre-filtered: Cosine word overlap score ({score:.3f}) below threshold ({min_score})."
+            filtered_out.append(r)
+        else:
+            keep.append(r)
+            
+    return keep, filtered_out
 
 
 async def search_and_scrape(
@@ -219,18 +317,25 @@ async def search_and_scrape(
 
     # Step 2: Relevance filter (AutoEval)
     if llm and search_results:
-        logger.info(f"Running relevance AutoEval on {len(search_results)} search results...")
-        eval_results = await _evaluate_relevance_batch(
-            search_results, query.query, llm, model=model, provider=provider
-        )
+        keep_results, pre_filtered = pre_filter_search_results(query.query, search_results)
+        logger.info(f"Snippet pre-filtering: kept {len(keep_results)}/{len(search_results)} results, pre-filtered {len(pre_filtered)}")
+        
+        if keep_results:
+            logger.info(f"Running relevance AutoEval on {len(keep_results)} search results...")
+            eval_results = await _evaluate_relevance_batch(
+                keep_results, query.query, llm, model=model, provider=provider
+            )
 
-        # Attach scores to SearchResult models
-        for r, score, rationale in eval_results:
-            r.relevance_score = score
-            r.eval_rationale = rationale
+            # Attach scores to SearchResult models
+            for r, score, rationale in eval_results:
+                r.relevance_score = score
+                r.eval_rationale = rationale
 
-        passed_results = [r for r, score, _ in eval_results if score >= 0.7]
-        logger.info(f"Relevance AutoEval: {len(passed_results)}/{len(search_results)} passed threshold (>=0.7)")
+            passed_results = [r for r, score, _ in eval_results if score >= 0.7]
+        else:
+            passed_results = []
+            
+        logger.info(f"Relevance AutoEval: {len(passed_results)}/{len(keep_results)} passed threshold (>=0.7)")
     else:
         passed_results = search_results
 

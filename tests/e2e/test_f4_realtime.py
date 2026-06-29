@@ -128,18 +128,19 @@ async def test_sse_client_disconnect(valid_research_request, mock_auth_headers):
     # Run the generator in a task and cancel it mid-stream
     async def consume():
         async for chunk in gen:
-            # Sleep briefly to ensure the task cancellation happens while suspended
+            # Cancel the task as soon as we get the first chunk to ensure mid-stream cancellation
+            task.cancel()
             await asyncio.sleep(0.01)
 
     task = asyncio.create_task(consume())
-    await asyncio.sleep(0.05)
-    
-    task.cancel()
     try:
         await task
     except asyncio.CancelledError:
         pass
         
+    # Explicitly close generator to trigger finally block immediately
+    await gen.aclose()
+    
     # Wait a moment for background task cancel propagation
     await asyncio.sleep(0.1)
     

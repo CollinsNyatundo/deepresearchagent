@@ -20,13 +20,30 @@ class CacheManager:
 
     def __init__(self, db_path: str | Path = "outputs/cache.db"):
         self.db_path = Path(db_path)
+        self._initialized_paths = set()
+
+    @property
+    def current_db_path(self) -> Path:
+        from research_engine.config import workspace_id_var
+        workspace_id = workspace_id_var.get()
+        if workspace_id:
+            path = Path("openkb") / workspace_id / "cache.db"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            return path
+        return self.db_path
 
     async def init_db(self) -> None:
         """Asynchronously initialize the cache database tables."""
+        db_path = self.current_db_path
+        if db_path in self._initialized_paths:
+            return
 
         def _init():
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(self.db_path) as conn:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("PRAGMA busy_timeout=5000;")
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS query_cache (
                         normalized_query TEXT PRIMARY KEY,
@@ -42,8 +59,11 @@ class CacheManager:
                     );
                 """)
                 conn.commit()
+            finally:
+                conn.close()
 
         await asyncio.to_thread(_init)
+        self._initialized_paths.add(db_path)
 
     def normalize_query(self, query: str) -> str:
         """Strip punctuation, lowercase, and alphabetically sort query keywords."""
@@ -57,18 +77,25 @@ class CacheManager:
 
     async def get_search_results(self, query: str, ttl_hours: float = 12.0) -> list[SearchResult] | None:
         """Retrieve cached search results for a query if within TTL."""
+        await self.init_db()
         normalized = self.normalize_query(query)
         if not normalized:
             return None
+        db_path = self.current_db_path
 
         def _get():
-            with sqlite3.connect(self.db_path) as conn:
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("PRAGMA busy_timeout=5000;")
                 cursor = conn.cursor()
                 cursor.execute(
                     "SELECT results_json, created_at FROM query_cache WHERE normalized_query = ?",
                     (normalized,),
                 )
                 return cursor.fetchone()
+            finally:
+                conn.close()
 
         row = await asyncio.to_thread(_get)
         if not row:
@@ -91,21 +118,28 @@ class CacheManager:
 
     async def set_search_results(self, query: str, results: list[SearchResult]) -> None:
         """Cache search results for a query."""
+        await self.init_db()
         normalized = self.normalize_query(query)
         if not normalized:
             return
+        db_path = self.current_db_path
 
         def _set():
             data = [r.model_dump() for r in results]
             results_json = json.dumps(data)
             created_at_str = datetime.now(UTC).isoformat()
-            with sqlite3.connect(self.db_path) as conn:
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("PRAGMA busy_timeout=5000;")
                 conn.execute(
                     "INSERT OR REPLACE INTO query_cache (normalized_query, results_json, created_at) "
                     "VALUES (?, ?, ?)",
                     (normalized, results_json, created_at_str),
                 )
                 conn.commit()
+            finally:
+                conn.close()
 
         await asyncio.to_thread(_set)
 
@@ -113,15 +147,22 @@ class CacheManager:
         """Retrieve cached page content for a URL if within TTL."""
         if not url:
             return None
+        await self.init_db()
+        db_path = self.current_db_path
 
         def _get():
-            with sqlite3.connect(self.db_path) as conn:
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("PRAGMA busy_timeout=5000;")
                 cursor = conn.cursor()
                 cursor.execute(
                     "SELECT content_json, created_at FROM page_cache WHERE url = ?",
                     (url,),
                 )
                 return cursor.fetchone()
+            finally:
+                conn.close()
 
         row = await asyncio.to_thread(_get)
         if not row:
@@ -146,15 +187,22 @@ class CacheManager:
         """Cache scraped page contents."""
         if not page or not page.url:
             return
+        await self.init_db()
+        db_path = self.current_db_path
 
         def _set():
             content_json = page.model_dump_json()
             created_at_str = datetime.now(UTC).isoformat()
-            with sqlite3.connect(self.db_path) as conn:
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("PRAGMA busy_timeout=5000;")
                 conn.execute(
                     "INSERT OR REPLACE INTO page_cache (url, content_json, created_at) VALUES (?, ?, ?)",
                     (page.url, content_json, created_at_str),
                 )
                 conn.commit()
+            finally:
+                conn.close()
 
         await asyncio.to_thread(_set)

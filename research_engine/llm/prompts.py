@@ -45,6 +45,34 @@ that covers an area not yet explored. Return JSON:
 }}
 """
 
+BATCH_SEARCH_QUERY_GENERATION_TEMPLATE = """\
+You are a skilled search query generator. Given a research topic, a research plan,
+and what has already been researched, generate 2-3 distinct, highly optimal search queries to be executed in parallel.
+Each query must target a different angle or aspect of the research topic and plan to maximize data coverage.
+
+Research Topic: {topic}
+
+Current Research Plan:
+{plan}
+
+Research History (what we already know):
+{history}
+
+Generate 2-3 search queries. Return JSON:
+{{
+  "queries": [
+    {{
+      "query": "first search query here",
+      "rationale": "brief explanation of why this query"
+    }},
+    {{
+      "query": "second search query here",
+      "rationale": "brief explanation of why this query"
+    }}
+  ]
+}}
+"""
+
 # ─── Answer Synthesis (enhanced for full-page content) ───────────────
 
 SEARCH_ANSWER_GENERATION_TEMPLATE = """\

@@ -30,6 +30,8 @@ def parse_wiki_link(raw: str) -> dict:
 
 def find_backlinks(workspace_id: str, target_title: str, client) -> list[dict]:
     """Find all notes in a workspace that link to a given title."""
+    if not isinstance(target_title, str) or not re.match(r'^[a-zA-Z0-9_\-\s\(\)\.\,\!\?\:\/]+$', target_title):
+        return []
     try:
         response = client.table("notes").select("id, title, content, updated_at") \
             .eq("workspace_id", workspace_id) \
@@ -38,3 +40,4 @@ def find_backlinks(workspace_id: str, target_title: str, client) -> list[dict]:
         return response.data or []
     except Exception:
         return []
+

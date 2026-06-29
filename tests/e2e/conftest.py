@@ -542,9 +542,11 @@ def apply_e2e_patches():
     # 2. LLM Provider patch
     from research_engine.llm.provider import LLMProvider
     async def mock_llm_call(self, prompt, *args, **kwargs):
+        await asyncio.sleep(0.02)
         return "This is a mock unstructured research summary answer."
 
     async def mock_llm_call_structured(self, prompt, schema, *args, **kwargs):
+        await asyncio.sleep(0.02)
         return generate_mock_pydantic(schema)
 
     class MockChunk:
@@ -556,6 +558,7 @@ def apply_e2e_patches():
             pass
 
         async def ainvoke(self, prompt, *args, **kwargs):
+            await asyncio.sleep(0.02)
             return MockChunk("This is a mock unstructured research summary answer.")
 
         async def astream(self, prompt, *args, **kwargs):
@@ -564,6 +567,7 @@ def apply_e2e_patches():
         def with_structured_output(self, schema, method=None, *args, **kwargs):
             class MockStructuredLLM:
                 async def ainvoke(self, prompt, *args, **kwargs):
+                    await asyncio.sleep(0.02)
                     return generate_mock_pydantic(schema)
             return MockStructuredLLM()
 

@@ -150,14 +150,17 @@ export function ReportView({ runId }: Props) {
 
   const handleSaveToNotes = async () => {
     if (!runDetails) return
+    if (!runDetails.workspace_id) {
+      setSaveMessage('Error: No workspace_id in run details. The run may be too old or the DB connection failed.')
+      return
+    }
     setSavingToNotes(true)
     setSaveMessage(null)
     try {
-      const workspaceId = runDetails.workspace_id || ''
       const noteTitle = `Research: ${runDetails.query || 'Untitled'}`
       const noteContent = `${markdown}\n\n---\n\n*Research run: [[run:${runId}]]*`
       const note = await api.createNote({
-        workspace_id: workspaceId,
+        workspace_id: runDetails.workspace_id,
         title: noteTitle,
         content: noteContent,
         tags: ['research'],
@@ -166,7 +169,13 @@ export function ReportView({ runId }: Props) {
       setSaveMessage(`Saved to note: "${note.title}"`)
       setTimeout(() => setSaveMessage(null), 3000)
     } catch (err) {
-      setSaveMessage(err instanceof Error ? err.message : 'Save failed')
+      const msg = err instanceof Error ? err.message : 'Save failed'
+      // Show a more actionable message for RLS/key issues
+      if (msg.includes('service_role') || msg.includes('RLS') || msg.includes('authorization')) {
+        setSaveMessage('Error: Supabase service_role key is required. Check your SUPABASE_KEY in config.toml.')
+      } else {
+        setSaveMessage(msg)
+      }
     } finally {
       setSavingToNotes(false)
     }
@@ -510,7 +519,7 @@ export function ReportView({ runId }: Props) {
               }
             }}
           >
-            {markdown.replace(/\[\[([^\]]+)\]\]/g, (_match: string, inner: string) => `[${inner}](${inner.includes(':') ? inner : 'wiki:' + inner})`)}
+            {markdown.replace(/\[\[([^\]]+)\]\]/g, (_match: string, inner: string) => `[${inner}](${inner.includes(':') ? inner : 'note:' + inner})`)}
           </ReactMarkdown>
         </div>
       </div>
