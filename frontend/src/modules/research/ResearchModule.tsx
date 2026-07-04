@@ -13,7 +13,6 @@ import { KnowledgeGraphView } from '../../components/knowledge-graph/KnowledgeGr
 import { api } from '../../api/client'
 import { useAuth } from '../../lib/authContext'
 import { useResearch } from '../../lib/researchContext'
-import { WorkspaceSelector } from '../../components/Auth/WorkspaceSelector'
 import Layout from '../../components/layout/Layout'
 import { cn } from '../../lib/utils'
 import { TokenCounter } from '../../components/TokenCounter'
@@ -28,7 +27,6 @@ export default function ResearchModule() {
   const { user, signOut } = useAuth()
   const {
     selectedWorkspaceId,
-    setSelectedWorkspaceId,
     selectedRunId,
     setSelectedRunId,
     activeTab,
@@ -75,15 +73,6 @@ export default function ResearchModule() {
   // ─── Sidebar Content ───────────────────────────────────────────
   const sidebarContent = (
     <div className="flex flex-col h-full py-3 gap-0.5">
-      {/* Workspace */}
-      <div className="px-3 mb-1">
-        <p className="sidebar-section-label">Workspace</p>
-        <WorkspaceSelector
-          selectedWorkspaceId={selectedWorkspaceId}
-          onWorkspaceSelect={setSelectedWorkspaceId}
-        />
-      </div>
-
       {/* View mode toggle */}
       <div className="px-3 mb-2">
         <div className="flex bg-white/[0.03] rounded-xl p-0.5">

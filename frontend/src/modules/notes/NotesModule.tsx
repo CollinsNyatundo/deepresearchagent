@@ -8,7 +8,7 @@ import {
 import type { Note, NoteSummary, Backlink } from '../../types/api'
 import { api } from '../../api/client'
 import { useAuth } from '../../lib/authContext'
-import { WorkspaceSelector } from '../../components/Auth/WorkspaceSelector'
+import { useResearch } from '../../lib/researchContext'
 import Layout from '../../components/layout/Layout'
 import { MarkdownPreview } from '../../components/notes/MarkdownPreview'
 import CelestialWidget from '../../components/CelestialWidget'
@@ -18,7 +18,7 @@ export default function NotesModule() {
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null)
+  const { selectedWorkspaceId } = useResearch()
   const [notes, setNotes] = useState<NoteSummary[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(false)
@@ -297,8 +297,6 @@ export default function NotesModule() {
       <div className="flex flex-col items-center gap-1 pb-2 border-b border-white/[0.06]">
         <CelestialWidget size={48} />
       </div>
-
-      <WorkspaceSelector selectedWorkspaceId={selectedWorkspaceId} onWorkspaceSelect={setSelectedWorkspaceId} />
 
       <button
         onClick={createNote}

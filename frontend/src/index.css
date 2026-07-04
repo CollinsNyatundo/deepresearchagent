@@ -425,71 +425,144 @@
 }
 
 @layer components {
-  /* ─── Nav Rail (icon-only sidebar mode) ──────────────────────── */
-  .nav-rail {
-    width: 48px;
-    flex-shrink: 0;
+  /* ─── Unified Collapsible Sidebar (Nightglass v1.4 Theme) ─── */
+  .sidebar-container {
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border-right: 1px solid rgba(255, 255, 255, 0.05);
     display: flex;
     flex-direction: column;
-    align-items: center;
-    padding: 12px 0;
-    gap: 2px;
-    background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(8px) saturate(130%);
-    -webkit-backdrop-filter: blur(8px) saturate(130%);
-    border-right: 1px solid rgba(255, 255, 255, 0.06);
     z-index: 40;
+    transition: width 250ms cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
+    user-select: none;
   }
 
-  .nav-rail-item {
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
+  .sidebar-brand {
+    height: 48px;
     display: flex;
     align-items: center;
-    justify-content: center;
-    color: #555;
-    transition: all 200ms ease;
+    padding: 0 14px;
+    gap: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    color: #e0e0e0;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .sidebar-menu-item {
+    height: 34px;
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    gap: 10px;
+    color: #777;
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 150ms ease;
     cursor: pointer;
     background: transparent;
     border: none;
+    text-align: left;
+    width: 100%;
+    border-radius: 8px;
     position: relative;
   }
 
-  .nav-rail-item:hover {
-    color: #999;
+  .sidebar-menu-item:hover {
+    color: #b3b3b3;
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .sidebar-menu-item.active {
+    color: #e0e0e0;
     background: rgba(255, 255, 255, 0.04);
   }
 
-  .nav-rail-item.active {
-    color: #c8956c;
-    background: rgba(200, 149, 108, 0.12);
-  }
-
-  .nav-rail-item.active::before {
+  .sidebar-menu-item.active::before {
     content: '';
     position: absolute;
-    left: -1px;
+    left: 0;
     top: 50%;
     transform: translateY(-50%);
     width: 3px;
-    height: 18px;
+    height: 16px;
     border-radius: 0 3px 3px 0;
     background: #c8956c;
   }
 
-  /* ─── Sidebar Section Labels (Nightglass grouping) ─────────── */
-  .sidebar-section-label {
-    font-size: 9px;
+  .sidebar-section-title {
+    font-size: 8px;
     font-weight: 700;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
-    color: #333;
-    padding: 0 8px;
-    margin-top: 4px;
-    margin-bottom: 2px;
+    color: #444;
+    padding: 0 14px;
+    margin-top: 14px;
+    margin-bottom: 4px;
     user-select: none;
+  }
+
+  /* PROJECTS / WORKSPACES List Item */
+  .sidebar-project-item {
+    height: 32px;
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    gap: 10px;
+    color: #666;
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 150ms ease;
+    cursor: pointer;
+    background: transparent;
+    border: none;
+    text-align: left;
+    width: 100%;
+    position: relative;
+  }
+
+  .sidebar-project-item:hover {
+    color: #a3a3a3;
+    background: rgba(255, 255, 255, 0.015);
+  }
+
+  .sidebar-project-item.active {
+    color: #c8956c;
+    background: rgba(200, 149, 108, 0.06);
+    border-radius: 0 8px 8px 0;
+  }
+
+  .sidebar-project-item.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 2.5px;
+    height: 14px;
+    border-radius: 0 2px 2px 0;
+    background: #c8956c;
+  }
+
+  /* Sticky Bottom Utilities */
+  .sidebar-bottom {
+    margin-top: auto;
+    border-top: 1px solid rgba(255, 255, 255, 0.03);
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .sidebar-bottom-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    padding: 2px 0;
   }
 
   /* ─── Settings Cards ──────────────────────────────────────── */
@@ -549,27 +622,10 @@
     backdrop-filter: blur(8px);
   }
 
-  .nav-rail-item:hover .tooltip-right,
-  .nav-rail-item:focus .tooltip-right {
+  .sidebar-menu-item:hover .tooltip-right,
+  .sidebar-project-item:hover .tooltip-right {
     opacity: 1;
     transform: translateY(-50%) translateX(0);
-  }
-
-  /* ─── Sidebar collapse/expand transition ─────────────────── */
-  .sidebar-panel {
-    transition: width 250ms cubic-bezier(0.4, 0, 0.2, 1),
-                opacity 200ms ease;
-    overflow: hidden;
-    flex-shrink: 0;
-  }
-
-  .sidebar-panel.collapsed {
-    width: 0 !important;
-    opacity: 0;
-  }
-
-  .sidebar-panel.expanded {
-    opacity: 1;
   }
 }
 
@@ -578,3 +634,4 @@
     text-wrap: balance;
   }
 }
+

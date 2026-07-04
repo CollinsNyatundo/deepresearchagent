@@ -1972,10 +1972,13 @@ async def get_settings(
     workspace_id: str,
     user_data: dict = Depends(verify_supabase_jwt),
 ):
-    """Return current workspace settings. API keys are returned as boolean (set/not set)."""
+    """Return current workspace settings. API keys are returned as boolean (set/not set).
+    Falls back to local file openkb/{workspace_id}/settings.json if app_settings table does not exist.
+    """
     await verify_workspace_membership(user_data["sub"], workspace_id)
 
     supabase = get_supabase_client()
+    row: dict = {}
 
     def _fetch():
         return (
@@ -1986,8 +1989,25 @@ async def get_settings(
             .execute()
         )
 
-    result = await asyncio.to_thread(_fetch)
-    row: dict = result.data or {}
+    try:
+        result = await asyncio.to_thread(_fetch)
+        row = result.data or {}
+    except Exception as e:
+        err_msg = str(e)
+        if "PGRST205" in err_msg or "public.app_settings" in err_msg:
+            # Fall back to local file storage
+            logger.info(f"Supabase app_settings table not found. Falling back to local file storage for workspace {workspace_id}")
+            from pathlib import Path
+            import json
+            local_path = Path("openkb") / workspace_id / "settings.json"
+            if local_path.exists():
+                try:
+                    row = json.loads(local_path.read_text(encoding="utf-8"))
+                except Exception as file_err:
+                    logger.warning(f"Failed to read local settings file: {file_err}")
+        else:
+            logger.error(f"Failed to fetch settings from Supabase: {e}")
+            raise HTTPException(status_code=500, detail=f"Database query failed: {err_msg}")
 
     merged = {**SETTINGS_DEFAULTS, **row}
 
@@ -2055,8 +2075,42 @@ async def update_settings(
             .execute()
         )
 
-    await asyncio.to_thread(_upsert)
+    try:
+        await asyncio.to_thread(_upsert)
+    except Exception as e:
+        err_msg = str(e)
+        if "PGRST205" in err_msg or "public.app_settings" in err_msg:
+            # Fall back to local file storage
+            logger.info(f"Supabase app_settings table not found. Writing settings to local file storage for workspace {workspace_id}")
+            from pathlib import Path
+            import json
+            from datetime import datetime, UTC
+            
+            local_dir = Path("openkb") / workspace_id
+            local_dir.mkdir(parents=True, exist_ok=True)
+            local_path = local_dir / "settings.json"
+            
+            existing = {}
+            if local_path.exists():
+                try:
+                    existing = json.loads(local_path.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+            
+            merged = {**existing, **update}
+            merged["updated_at"] = datetime.now(UTC).isoformat()
+            
+            try:
+                local_path.write_text(json.dumps(merged, indent=2, ensure_ascii=False), encoding="utf-8")
+            except Exception as file_err:
+                logger.error(f"Failed to write local settings file: {file_err}")
+                raise HTTPException(status_code=500, detail=f"Failed to write settings locally: {file_err}")
+        else:
+            logger.error(f"Failed to save settings to Supabase: {e}")
+            raise HTTPException(status_code=500, detail=f"Database save failed: {err_msg}")
+
     return {"status": "ok", "workspace_id": workspace_id}
+
 
 
 async def run_resynthesis_task(

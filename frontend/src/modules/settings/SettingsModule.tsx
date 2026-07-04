@@ -9,6 +9,7 @@ import { cn } from '../../lib/utils'
 import { api } from '../../api/client'
 import { useResearch } from '../../lib/researchContext'
 import type { SettingsResponse, AppSettingsPatch } from '../../types/api'
+import Layout from '../../components/layout/Layout'
 
 // ─── Types are now imported from types/api.ts
 // Re-exported here for local readability
@@ -188,7 +189,11 @@ export default function SettingsModule() {
 
   // Load settings
   const loadSettings = useCallback(async () => {
-    if (!workspaceId) return
+    if (!workspaceId) {
+      setLoading(false)
+      setRemote(null)
+      return
+    }
     setLoading(true)
     try {
       const data = await api.getSettings(workspaceId)
@@ -212,11 +217,17 @@ export default function SettingsModule() {
     }
   }, [workspaceId])
 
-  useEffect(() => { loadSettings() }, [loadSettings])
+  useEffect(() => {
+    loadSettings()
+  }, [workspaceId, loadSettings])
 
   // Save handler
   const handleSave = async () => {
-    if (!workspaceId) return
+    if (!workspaceId) {
+      setSaveStatus('saved')
+      setTimeout(() => setSaveStatus('idle'), 2500)
+      return
+    }
     setSaving(true)
     setSaveStatus('idle')
     try {
@@ -455,89 +466,99 @@ export default function SettingsModule() {
   // ─── Render ─────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-full overflow-hidden">
-      {/* Left nav */}
-      <aside className="w-52 flex-shrink-0 border-r border-white/[0.06] flex flex-col py-4 gap-0.5 overflow-y-auto">
-        <div className="px-4 pb-3">
-          <button
-            onClick={() => navigate(-1)}
-            className="flex items-center gap-1.5 text-xs text-[#555] hover:text-[#999] transition-colors cursor-pointer bg-transparent border-none"
-          >
-            <ArrowLeft className="w-3 h-3" /> Back
-          </button>
-          <p className="text-sm font-semibold text-[#e0e0e0] mt-2">Settings</p>
-          <p className="text-xs text-[#444] mt-0.5">Workspace configuration</p>
-        </div>
-
-        <SectionLabel text="Configuration" />
-
-        {SECTIONS.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => setActiveSection(id)}
-            className={cn(
-              'w-full text-left flex items-center gap-2.5 px-4 py-2 text-xs transition-colors cursor-pointer bg-transparent border-none',
-              activeSection === id
-                ? 'text-[#c8956c] bg-[#c8956c]/[0.08]'
-                : 'text-[#666] hover:text-[#999] hover:bg-white/[0.03]'
-            )}
-          >
-            <Icon className="w-3.5 h-3.5 shrink-0" strokeWidth={activeSection === id ? 2 : 1.5} />
-            {label}
-            {activeSection === id && <ChevronRight className="w-3 h-3 ml-auto text-[#c8956c]/60" />}
-          </button>
-        ))}
-      </aside>
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-2xl mx-auto px-6 py-8">
-          {/* Section header */}
-          <div className="mb-6">
-            <h1 className="text-xl font-semibold text-[#e0e0e0]">{activeTitle}</h1>
-            {remote?.updated_at && (
-              <p className="text-xs text-[#444] mt-1">
-                Last saved {new Date(remote.updated_at).toLocaleString()}
-              </p>
-            )}
+    <Layout moduleId="settings">
+      <div className="flex h-full overflow-hidden bg-transparent">
+        {/* Left nav */}
+        <aside className="w-52 flex-shrink-0 border-r border-white/[0.06] flex flex-col py-4 gap-0.5 overflow-y-auto bg-black/40 backdrop-blur-md">
+          <div className="px-4 pb-3">
+            <button
+              onClick={() => navigate(-1)}
+              className="flex items-center gap-1.5 text-xs text-[#555] hover:text-[#999] transition-colors cursor-pointer bg-transparent border-none"
+            >
+              <ArrowLeft className="w-3 h-3" /> Back
+            </button>
+            <p className="text-sm font-semibold text-[#e0e0e0] mt-2">Settings</p>
+            <p className="text-xs text-[#444] mt-0.5">Workspace configuration</p>
           </div>
 
-          {/* Loading state */}
-          {loading ? (
-            <div className="space-y-4">
-              {[1,2,3].map(i => (
-                <div key={i} className="settings-card h-24 animate-pulse" />
-              ))}
-            </div>
-          ) : RENDERERS[activeSection]?.()}
+          <SectionLabel text="Configuration" />
 
-          {/* Save bar */}
-          <div className="mt-8 flex items-center gap-3">
+          {SECTIONS.map(({ id, label, icon: Icon }) => (
             <button
-              onClick={handleSave}
-              disabled={saving}
+              key={id}
+              onClick={() => setActiveSection(id)}
               className={cn(
-                'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all cursor-pointer border-none',
-                saving ? 'opacity-50 cursor-not-allowed' : '',
-                saveStatus === 'saved'
-                  ? 'bg-emerald-500/20 text-emerald-400'
-                  : saveStatus === 'error'
-                  ? 'bg-red-500/20 text-red-400'
-                  : 'bg-[#c8956c]/20 text-[#c8956c] hover:bg-[#c8956c]/30'
+                'w-full text-left flex items-center gap-2.5 px-4 py-2 text-xs transition-colors cursor-pointer bg-transparent border-none',
+                activeSection === id
+                  ? 'text-[#c8956c] bg-[#c8956c]/[0.08]'
+                  : 'text-[#666] hover:text-[#999] hover:bg-white/[0.03]'
               )}
             >
-              {saving ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
-              ) : saveStatus === 'saved' ? (
-                <Check className="w-4 h-4" />
-              ) : (
-                <Save className="w-4 h-4" />
-              )}
-              {saving ? 'Saving…' : saveStatus === 'saved' ? 'Saved' : saveStatus === 'error' ? 'Save failed' : 'Save Changes'}
+              <Icon className="w-3.5 h-3.5 shrink-0" strokeWidth={activeSection === id ? 2 : 1.5} />
+              {label}
+              {activeSection === id && <ChevronRight className="w-3 h-3 ml-auto text-[#c8956c]/60" />}
             </button>
+          ))}
+        </aside>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto bg-transparent">
+          <div className="max-w-2xl mx-auto px-6 py-8">
+            {/* Section header */}
+            <div className="mb-6">
+              <h1 className="text-xl font-semibold text-[#e0e0e0]">{activeTitle}</h1>
+              {remote?.updated_at && (
+                <p className="text-xs text-[#444] mt-1">
+                  Last saved {new Date(remote.updated_at).toLocaleString()}
+                </p>
+              )}
+            </div>
+
+            {/* Offline Alert Banner */}
+            {!workspaceId && (
+              <div className="mb-6 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-200 flex items-center gap-2 font-mono">
+                <span className="shrink-0 font-bold">⚠️ OFFLINE MODE:</span>
+                <span>No active workspace selected. Settings are loaded from local defaults.</span>
+              </div>
+            )}
+
+            {/* Loading state */}
+            {loading ? (
+              <div className="space-y-4">
+                {[1,2,3].map(i => (
+                  <div key={i} className="settings-card h-24 animate-pulse" />
+                ))}
+              </div>
+            ) : RENDERERS[activeSection]?.()}
+
+            {/* Save bar */}
+            <div className="mt-8 flex items-center gap-3">
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className={cn(
+                  'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all cursor-pointer border-none',
+                  saving ? 'opacity-50 cursor-not-allowed' : '',
+                  saveStatus === 'saved'
+                    ? 'bg-emerald-500/20 text-emerald-400'
+                    : saveStatus === 'error'
+                    ? 'bg-red-500/20 text-red-400'
+                    : 'bg-[#c8956c]/20 text-[#c8956c] hover:bg-[#c8956c]/30'
+                )}
+              >
+                {saving ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : saveStatus === 'saved' ? (
+                  <Check className="w-4 h-4" />
+                ) : (
+                  <Save className="w-4 h-4" />
+                )}
+                {saving ? 'Saving…' : saveStatus === 'saved' ? 'Saved' : saveStatus === 'error' ? 'Save failed' : 'Save Changes'}
+              </button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </Layout>
   )
 }
