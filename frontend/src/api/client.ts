@@ -83,6 +83,26 @@ export const api = {
   },
 
   /**
+   * Fetch workspace-scoped app settings. API keys returned as booleans.
+   */
+  async getSettings(workspaceId: string): Promise<import('../types/api').SettingsResponse> {
+    const res = await fetch(`${BASE_URL}/api/settings?workspace_id=${workspaceId}`);
+    return handleResponse<import('../types/api').SettingsResponse>(res);
+  },
+
+  /**
+   * Save app settings (PATCH — sends only changed fields).
+   */
+  async updateSettings(workspaceId: string, body: import('../types/api').AppSettingsPatch): Promise<void> {
+    const res = await fetch(`${BASE_URL}/api/settings?workspace_id=${workspaceId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return handleResponse<void>(res);
+  },
+
+  /**
    * List all past research runs, newest first.
    */
   async listRuns(workspaceId: string): Promise<RunSummary[]> {

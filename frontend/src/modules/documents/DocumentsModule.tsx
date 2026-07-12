@@ -9,7 +9,7 @@ import {
 import type { Document, WikiPage } from '../../types/api'
 import { api } from '../../api/client'
 import { useAuth } from '../../lib/authContext'
-import { WorkspaceSelector } from '../../components/Auth/WorkspaceSelector'
+import { useResearch } from '../../lib/researchContext'
 import Layout from '../../components/layout/Layout'
 import { MarkdownPreview } from '../../components/notes/MarkdownPreview'
 
@@ -17,7 +17,7 @@ export default function DocumentsModule() {
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(null)
+  const { selectedWorkspaceId } = useResearch()
   const [searchQuery, setSearchQuery] = useState('')
   const [activeDocTab, setActiveDocTab] = useState<'upload' | 'query' | 'chat' | 'wiki' | 'skills'>('upload')
   const [documents, setDocuments] = useState<Document[]>([])
@@ -358,8 +358,6 @@ export default function DocumentsModule() {
 
   const sidebarContent = (
     <div className="flex flex-col h-full p-3 gap-3">
-      <WorkspaceSelector selectedWorkspaceId={selectedWorkspaceId} onWorkspaceSelect={setSelectedWorkspaceId} />
-
       <button
         onClick={() => fileInputRef.current?.click()}
         className="flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl text-sm font-medium text-[#e0e0e0] bg-[#c8956c]/15 hover:bg-[#c8956c]/25 transition-colors duration-150 cursor-pointer border-none"

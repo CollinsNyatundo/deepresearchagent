@@ -1,50 +1,37 @@
-import { type ReactNode, useState } from 'react'
-import Header from './Header'
+import { type ReactNode } from 'react'
 import Sidebar from './Sidebar'
 import BackgroundRenderer from '../backgrounds/BackgroundRenderer'
 import { ErrorBoundary } from '../ErrorBoundary'
 
 interface LayoutProps {
-  sidebar: ReactNode
+  sidebar?: ReactNode
   children: ReactNode
   userEmail?: string
   onSignOut?: () => void
+  moduleId?: string
 }
 
-export default function Layout({ sidebar, children, userEmail, onSignOut }: LayoutProps) {
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-
+export default function Layout({ sidebar, children }: LayoutProps) {
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-black relative">
+    <div className="h-screen w-screen flex overflow-hidden bg-black relative">
       {/* Background layer — z-0 */}
       <div className="absolute inset-0 z-0">
         <BackgroundRenderer />
       </div>
 
-      {/* Header — z-10 */}
-      <div className="z-10 relative">
-        <Header
-          userEmail={userEmail}
-          onSignOut={onSignOut}
-          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-        />
-      </div>
-
       {/* Body — z-10 */}
       <div className="flex-1 flex overflow-hidden z-10 relative">
-        {/* Sidebar — 240px, liquid-glass */}
-        <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)}>
+        {/* Unified Left Sidebar */}
+        <Sidebar>
           {sidebar}
         </Sidebar>
 
-        {/* 1px gap */}
-        <div className="w-px flex-shrink-0 hidden lg:block" />
-
         {/* Main content */}
-        <main className="flex-1 overflow-hidden flex flex-col">
+        <main className="flex-1 overflow-hidden flex flex-col relative bg-transparent">
           <ErrorBoundary>{children}</ErrorBoundary>
         </main>
       </div>
     </div>
   )
 }
+

@@ -11,6 +11,8 @@ import { ResearchProvider } from './lib/researchContext'
 const ResearchModule = lazy(() => import('./modules/research/ResearchModule'))
 const NotesModule = lazy(() => import('./modules/notes/NotesModule'))
 const DocumentsModule = lazy(() => import('./modules/documents/DocumentsModule'))
+const SettingsModule = lazy(() => import('./modules/settings/SettingsModule'))
+const NodesModule = lazy(() => import('./modules/nodes/NodesModule'))
 
 const LoadingFallback = () => (
   <div className="h-screen w-full flex items-center justify-center bg-black text-[#999]">
@@ -44,6 +46,8 @@ export default function App() {
             <Route path="/research/*" element={<ResearchModule />} />
             <Route path="/notes/*" element={<NotesModule />} />
             <Route path="/documents/*" element={<DocumentsModule />} />
+            <Route path="/settings/*" element={<SettingsModule />} />
+            <Route path="/nodes/*" element={<NodesModule />} />
             <Route path="/todo" element={<TodoDemo />} />
             <Route path="/" element={<Navigate to="/research" replace />} />
           </Routes>

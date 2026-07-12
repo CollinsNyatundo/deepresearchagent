@@ -582,7 +582,39 @@ export type QualityReviewRequest = {
 };
 
 
+// ─── Settings Types ───────────────────────────────────────────────────────
 
+export type SettingsResponse = {
+  workspace_id: string;
+  default_provider: string;
+  default_model: string;
+  default_depth: number;
+  openrouter_api_key_set: boolean;
+  groq_api_key_set: boolean;
+  default_format: string;
+  default_length: string;
+  default_audience: string;
+  background_mode: string;
+  accent_color: string;
+  sidebar_expanded: boolean;
+  default_workspace_id?: string | null;
+  updated_at?: string | null;
+};
 
+/** Partial update — only send fields you want to change */
+export type AppSettingsPatch = {
+  default_provider?: string;
+  default_model?: string;
+  default_depth?: number;
+  openrouter_api_key?: string;   // write-only
+  groq_api_key?: string;         // write-only
+  default_format?: string;
+  default_length?: string;
+  default_audience?: string;
+  background_mode?: string;
+  accent_color?: string;
+  sidebar_expanded?: boolean;
+  default_workspace_id?: string;
+};
 
 
