@@ -114,12 +114,11 @@ npm run dev
 
 ```
 deepresearchagent/
-├── docs/                      # Brainstorming, ideation, plans, and templates
+├── docs/                      # Architecture, guides, plans; working notes in docs/notes/
 ├── frontend/                  # React + Tailwind CSS client dashboard
 │   ├── src/                   # React source files (components, api, types)
 │   └── design.md              # Design system documentation
-├── graphify-out/              # Pre-built knowledge graph of the codebase
-├── openkb/                    # Workspace-isolated document files, wikis, and output
+├── openkb/                    # Workspace-isolated documents (created at runtime, git-ignored)
 ├── research/                  # Analytical document archives
 ├── research_engine/           # FastAPI backend server
 │   ├── agent/                 # Core orchestrator, planner, searcher, crossover, retry
@@ -129,13 +128,13 @@ deepresearchagent/
 │   ├── utils/                 # OpenKB and wiki link parsers
 │   ├── api.py                 # FastAPI routes (20+ REST/SSE endpoints)
 │   └── cli.py                 # Typer command-line interface
+├── scripts/live/              # Manual end-to-end checks against real LLM providers and the DB
 ├── tests/                     # pytest E2E and unit test suite
 ├── AGENTS.md                  # Development guidelines and common design patterns
 ├── CLAUDE.md                  # Architecture reference and commands guide
 ├── STRATEGY.md                # Project roadmap and priority tracks
 ├── TEST_INFRA.md              # Testing guide for developers
-├── pyproject.toml             # Python metadata, packaging and dependencies
-└── uv.lock                    # Locked python dependencies
+└── pyproject.toml             # Python metadata, packaging and dependencies
 ```
 
 ---
