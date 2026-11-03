@@ -5,8 +5,6 @@
 
 A multi-module AI-powered research platform featuring deep iterative web research, workspace-isolated personal wiki notes, and intelligent document ingestion.
 
-[![License: MIT](https://img.shields.io/github/license/CollinsNyatundo/deepresearchagent?style=for-the-badge&color=yellow)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/CollinsNyatundo/deepresearchagent?style=for-the-badge&color=gold)](https://github.com/CollinsNyatundo/deepresearchagent/stargazers)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=white)](https://react.dev)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v3.4.19-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white)](https://tailwindcss.com)
@@ -24,7 +22,7 @@ A multi-module AI-powered research platform featuring deep iterative web researc
 ## Key Modules
 
 ### 1. 🔍 Research Module
-Perplexity-grade autonomous deep web research engine that explores topics, validates sources, and reflects on coverage gaps.
+Autonomous deep web research engine that explores topics, validates sources, and reflects on coverage gaps.
 - **DRE Orchestrator**: Runs up to 30 iterative research cycles with reflective retries to resolve gaps.
 - **SSE Progress Stream**: Exposes real-time agent logic, search terms, validation parameters, and transfer metrics.
 - **Interactive Mindmaps**: Renders findings into hierarchical AntV G6 mindmaps supporting node expansion.
