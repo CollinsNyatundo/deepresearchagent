@@ -163,12 +163,6 @@ deepresearchagent/
 
 We welcome contributions to optimize the research orchestrator and enhance note-taking functionality. Please refer to [AGENTS.md](AGENTS.md) for style conventions.
 
-<a href="https://github.com/CollinsNyatundo/deepresearchagent/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=CollinsNyatundo/deepresearchagent" />
-</a>
-
----
-
 ## License
 
 MIT License — see the [LICENSE](LICENSE) file for details.
