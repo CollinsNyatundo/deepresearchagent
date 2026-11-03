@@ -166,11 +166,3 @@ We welcome contributions to optimize the research orchestrator and enhance note-
 ## License
 
 MIT License — see the [LICENSE](LICENSE) file for details.
-
----
-
-<div align="center">
-
-[![Star History Chart](https://api.star-history.com/svg?repos=CollinsNyatundo/deepresearchagent&type=Date)](https://star-history.com/#CollinsNyatundo/deepresearchagent&Date)
-
-</div>
