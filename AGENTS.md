@@ -299,7 +299,7 @@ DeepResearchAgent/
 ├── AGENTS.md                          # This file
 ├── config.toml                        # Secrets (git-ignored)
 ├── config.example.toml                # Template (checked in)
-├── full-scope-integration-plan.md     # Architecture roadmap
+├── docs/notes/full-scope-integration-plan.md  # Architecture roadmap
 ├── frontend/design.md                 # Frontend design system (NOT at root)
 ├── research/
 │   └── browsery-tools-analysis.md     # External research artifacts
